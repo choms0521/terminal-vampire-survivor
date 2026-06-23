@@ -271,7 +271,7 @@ python bench/render_spike.py --glyphs 200 --mode diff --viewport 80x24 ...
 **산출물**
 
 - `config/tuning.toml`: `sim_tps`, `viewport_w`, `viewport_h`, `entity_cap`,
-  `render_mode`, `poll_timeout`, `max_catchup`, `aspect_x_compress` 등 키 기입.
+  `render_mode`, `poll_timeout`, `max_catchup`, `aspect_x` 등 키 기입.
 - `bench/results/decision.md`: 결정 규칙 적용 과정과 채택 근거, fallback 판정 결과.
 
 **OMC 위임**: `scientist` (표→작동점 도출) + `critic` (결정 규칙 일관성·fallback 타당성 검토).

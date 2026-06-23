@@ -209,7 +209,7 @@
 
 - `rules/leveling.py`:
   - `xp_for_level(level, defs) -> int` (순수, 경험치 곡선).
-  - `roll_choices(build_state, defs, rng, n) -> tuple[Choice, ...]` (순수). 보유 무기 강화/
+  - `roll_choices(build_state, defs, rng, n) -> tuple[Choice, ...]` (순수, Phase 1 `roll_choices(level_state, cfg, rng, n=1)`를 `build_state`·`defs`·N택으로 일반화). 보유 무기 강화/
     신규 무기/패시브 후보를 가중 추출, 만렙 무기·만렙 패시브는 후보에서 제외.
   - `apply_choice(build_state, choice) -> BuildState` (순수, 새 불변 상태 반환).
   - `effective_stats(build_state, defs) -> Stats` (순수). 공속/이속/자석 범위에 패시브 곱연산.

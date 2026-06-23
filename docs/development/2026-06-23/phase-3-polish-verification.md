@@ -44,7 +44,7 @@
 
 | # | 산출물 | 위치 |
 | --- | --- | --- |
-| KD1 | 헤드리스 테스트 스위트(rules 단위테스트) | `tests/test_weapons.py`, `tests/test_damage.py`, `tests/test_evolution.py`, `tests/test_leveling.py` |
+| KD1 | 헤드리스 테스트 스위트 — Phase 1·2가 산출한 rules 단위테스트의 **확장·커버리지 보강**(신규 작성 아님) | `tests/test_weapons.py`, `tests/test_damage.py`, `tests/test_evolution.py`, `tests/test_leveling.py` (기존 스위트) |
 | KD2 | config 로드·검증 테스트 | `tests/test_config.py` |
 | KD3 | import smoke 테스트 | `tests/test_import_smoke.py` |
 | KD4 | 헤드리스 완주 회귀 테스트 + 시뮬레이션 드라이버 | `tests/test_full_run.py`, `tests/support/sim_driver.py` |
@@ -366,7 +366,7 @@ def run_until_gameover(cfg, rng, input_script, max_ticks):
     sim = new_run(cfg, rng)          # 가변 시뮬레이션 상태
     ticks = 0
     for intent in _iter_inputs(input_script, max_ticks):
-        step(sim, intent, rng)       # 제자리 갱신(가변 경계 내부)
+        step(sim, intent, cfg, rng)  # 제자리 갱신(가변 경계 내부)
         ticks += 1
         if sim.player.hp <= 0:       # 게임오버 도달
             return {"reached_gameover": True, "ticks": ticks, "kills": sim.kills}

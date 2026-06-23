@@ -45,7 +45,7 @@
 - 다중 무기·패시브(공속/이속/자석 강화) — Phase 2
 - 디렉터 난이도 곡선(시간 기반 스폰율 상승·강화 스텝) — Phase 2
 - 적 2종째(빠른 약체 떼), 보스/엘리트 — Phase 2
-- 넉백 계산, hazard(장판/오라) — Phase 2
+- hazard(장판/오라) — Phase 2 (넉백 계산은 Phase 1 `rules/damage.py`에 포함)
 - diff 렌더 최적화(Phase 1은 단순 전체 프레임 출력 또는 Phase 0 결정 방식) — 필요 시 Phase 2/3
 - HUD 전체(무기/패시브 아이콘·킬 수 등)는 Phase 1 최소(HP·레벨·경험치·생존 타이머)만 — 확장은 Phase 3
 - 게임오버/재시작 폴리시, 밸런스 1차 — Phase 3
@@ -175,8 +175,8 @@
 **산출물.**
 - `rules/defs.py`: 불변 설정 객체에서 밸런스 테이블 구성. `weapon_def(cfg)`, `enemy_def(cfg)`, `xp_curve(cfg)`.
 - `rules/weapons.py`: `select_target(player_pos, enemies, cfg) -> enemy_id | None`(최근접, **타이브레이크는 최저 entity id로 결정적**), `should_fire(weapon_state, dt, cfg) -> bool`(쿨다운 만료), `spawn_projectile_intent(player_pos, target_pos, cfg) -> ProjectileSpec`. 모두 순수 함수.
-- `rules/damage.py`: `apply_hit(hp, dmg) -> new_hp`, `is_dead(hp) -> bool`. 넉백은 Phase 2(stub 또는 미작성).
-- `rules/leveling.py`: `accrue_xp(level_state, gained) -> new_level_state`, `level_up_pending(level_state, cfg) -> bool`, `offer_choices(level_state, cfg, rng) -> list[Choice]`(**Phase 1은 1택만** 반환), `apply_choice(sim_facing_state, choice) -> ...`(순수 산출, 적용은 sim에서).
+- `rules/damage.py`: `apply_hit(hp, dmg) -> new_hp`, `is_dead(hp) -> bool`, `knockback(pos, source_pos, force) -> new_pos`(넉백 방향·크기, 순수 계산).
+- `rules/leveling.py`: `accrue_xp(level_state, gained) -> new_level_state`, `level_up_pending(level_state, cfg) -> bool`, `roll_choices(level_state, cfg, rng, n=1) -> tuple[Choice, ...]`(**Phase 1은 n=1 단일 선택만** 반환; Phase 2에서 `(build_state, defs, rng, n)`으로 일반화), `apply_choice(sim_facing_state, choice) -> ...`(순수 산출, 적용은 sim에서).
 - `rules/evolution.py`: stub(`def can_evolve(...): return False  # Phase 2`).
 
 **OMC 위임.** `tdd-guide` 또는 `test-engineer` (RED→GREEN, 헤드리스 단위테스트 우선) → 구현 `executor`.
@@ -186,14 +186,14 @@
 **기술 노트.**
 - 모든 rules 함수는 부수효과 없음 + 불변 입출력. 전역 상태·`blessed` 접근 금지(마스터 §13).
 - 타게팅 결정성: 최근접 거리 동률 시 **entity id 오름차순 최저값** 선택. 이 규칙을 weapons.py docstring과 테스트에 명시 → 단위테스트가 결정적.
-- `random.Random` 주입: `offer_choices`가 rng를 받지만 Phase 1은 선택지 1개라 사실상 결정적. 시그니처는 Phase 2 N택 대비 rng 인자 유지.
+- `random.Random` 주입: `roll_choices`가 rng를 받지만 Phase 1은 선택지 1개(n=1)라 사실상 결정적. 시그니처는 Phase 2 N택 대비 rng·n 인자 유지.
 - 경험치 곡선·무기 상수는 주입된 cfg에서만 읽는다. 테스트는 임의 cfg를 주입해 곡선·쿨다운을 검증.
 
 **측정 가능한 종료 조건.**
 - [ ] `python -m pytest tests/test_weapons.py tests/test_damage.py tests/test_leveling.py -q` → exit code 0
 - [ ] `test_weapons.py`: (a) 적 3마리 중 최근접 선택, (b) 거리 동률 2마리에서 **최저 id 선택**을 단언, (c) 적 0마리에서 `select_target == None`
 - [ ] `test_damage.py`: `apply_hit` 결과 단언, HP 0 이하 시 `is_dead == True`
-- [ ] `test_leveling.py`: 경험치 곡선 임계 미달→`level_up_pending False`, 임계 도달→`True`, `offer_choices` 길이 == 1, `accrue_xp`가 입력 상태를 변형하지 않음(불변 — 입력 객체 동일성/값 보존 단언)
+- [ ] `test_leveling.py`: 경험치 곡선 임계 미달→`level_up_pending False`, 임계 도달→`True`, `roll_choices` 길이 == 1, `accrue_xp`가 입력 상태를 변형하지 않음(불변 — 입력 객체 동일성/값 보존 단언)
 - [ ] `grep -rEn "import blessed|from blessed" terminal_vs/rules/` → 0건 (규칙 계층 blessed 비의존)
 - [ ] `grep -rEn "tie|lowest id|entity id" terminal_vs/rules/weapons.py` → 타이브레이크 규칙 주석 1건 이상
 
@@ -264,7 +264,7 @@
 | 3 | 적 AI 이동 | **구현** (플레이어 추적, 적 1종) | `sim/step.py` |
 | 4 | 무기 쿨다운·발사 | **구현** (단검 1종, 최근접 타게팅) | `rules/weapons.py` (순수) + `sim/step.py` |
 | 5 | 투사체 이동/수명 | **구현** | `sim/step.py` |
-| 6 | 충돌 해소 | **구현** (투사체↔적 데미지, 적↔플레이어 피해). **넉백 연기** | `sim/spatial.py` + `rules/damage.py` |
+| 6 | 충돌 해소 | **구현** (투사체↔적 데미지, 적↔플레이어 피해, 넉백 방향·크기) | `sim/spatial.py` + `rules/damage.py` |
 | 7 | 사망 처리 → 경험치 드랍 | **구현** | `sim/step.py` + `rules/damage.py` |
 | 8 | 픽업 수집 → 경험치 → 레벨업 트리거 | **구현** (자석 범위, 1택 트리거) | `rules/leveling.py` (순수) + `sim/step.py` |
 | 9 | 정리 (제거·디스폰) | **구현** | `sim/step.py` |
@@ -280,7 +280,7 @@
 | `rules/weapons.py`, `rules/damage.py`, `rules/leveling.py`, `rules/defs.py` | 실구현 |
 | `render/frame.py`, `render/hud.py`, `__main__.py` | 실구현 (HUD 최소) |
 | `rules/evolution.py` | **stub** (`return False`) |
-| 넉백 / hazard / 다중 무기 / 패시브 / diff 렌더 | **미작성 또는 후속 Phase** |
+| hazard / 다중 무기 / 패시브 / diff 렌더 | **미작성 또는 후속 Phase** |
 
 ### 3.2 §3.1 좌표계·종횡비
 
@@ -389,7 +389,7 @@ def step(state: "SimState", intent, cfg: Config, rng: random.Random) -> None:
     fire_weapons(state, cfg, rng)                      # 4) 구현 (rules.weapons 순수 호출)
     advance_projectiles(state)                         # 5) 구현 (이동/수명)
     grid = SpatialHash.build(state, cfg.entity_cap)    # 6) 충돌 질의용 공간 해시
-    resolve_collisions(state, grid, cfg)               #    구현 (rules.damage; 넉백은 Phase 2)
+    resolve_collisions(state, grid, cfg)               #    구현 (rules.damage; 넉백 방향·크기 포함)
     drop_xp_on_death(state, rng)                       # 7) 구현
     collect_pickups(state, cfg)                        # 8) 구현 (rules.leveling → level_up_pending 설정)
     cleanup_dead_and_far(state, cfg)                   # 9) 구현 (entity_cap·디스폰)
@@ -444,7 +444,7 @@ def run(term, cfg: Config, rng: random.Random) -> None:
 | A5 | spatial hash 정확성 | `python -m pytest tests/test_spatial.py -q` → exit code 0 (브루트포스 일치) | [ ] |
 | A6 | sim step 결정성 | `python -m pytest tests/test_sim_step.py -q` → exit code 0 (동일 시드 2회 일치) | [ ] |
 | A7 | 무기 최근접+타이브레이크 결정적 | `python -m pytest tests/test_weapons.py -q` → exit code 0 (최저 id 타이브레이크 단언 포함) | [ ] |
-| A8 | 데미지·경험치·레벨업 1택 | `python -m pytest tests/test_damage.py tests/test_leveling.py -q` → exit code 0 (`offer_choices` 길이 1, `accrue_xp` 불변) | [ ] |
+| A8 | 데미지·경험치·레벨업 1택 | `python -m pytest tests/test_damage.py tests/test_leveling.py -q` → exit code 0 (`roll_choices` 길이 1, `accrue_xp` 불변) | [ ] |
 | A9 | rules 계층 blessed 비의존 | `grep -rEn 'import blessed\|from blessed' terminal_vs/rules/ terminal_vs/sim/ terminal_vs/world.py` → 0건 | [ ] |
 | A10 | 헤드리스 통합 한 판 폐쇄 | `python -m pytest tests/test_integration_run.py -q` → exit code 0 (레벨업 1회 발생 + 시드 일치) | [ ] |
 | A11 | 전체 헤드리스 테스트 | `python -m pytest tests/ -q` → exit code 0 | [ ] |
