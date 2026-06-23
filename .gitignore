@@ -29,3 +29,6 @@ htmlcov/
 *.save
 saves/
 logs/
+
+# OMC internal working state
+.omc/
