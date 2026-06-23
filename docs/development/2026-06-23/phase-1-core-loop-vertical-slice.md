@@ -192,7 +192,7 @@
 **측정 가능한 종료 조건.**
 - [ ] `python -m pytest tests/test_weapons.py tests/test_damage.py tests/test_leveling.py -q` → exit code 0
 - [ ] `test_weapons.py`: (a) 적 3마리 중 최근접 선택, (b) 거리 동률 2마리에서 **최저 id 선택**을 단언, (c) 적 0마리에서 `select_target == None`
-- [ ] `test_damage.py`: `apply_hit` 결과 단언, HP 0 이하 시 `is_dead == True`
+- [ ] `test_damage.py`: `apply_hit` 결과 단언, HP 0 이하 시 `is_dead == True`, `knockback`이 source_pos 반대 방향으로 force만큼 변위(방향·크기 단언)
 - [ ] `test_leveling.py`: 경험치 곡선 임계 미달→`level_up_pending False`, 임계 도달→`True`, `roll_choices` 길이 == 1, `accrue_xp`가 입력 상태를 변형하지 않음(불변 — 입력 객체 동일성/값 보존 단언)
 - [ ] `grep -rEn "import blessed|from blessed" terminal_vs/rules/` → 0건 (규칙 계층 blessed 비의존)
 - [ ] `grep -rEn "tie|lowest id|entity id" terminal_vs/rules/weapons.py` → 타이브레이크 규칙 주석 1건 이상
@@ -444,7 +444,7 @@ def run(term, cfg: Config, rng: random.Random) -> None:
 | A5 | spatial hash 정확성 | `python -m pytest tests/test_spatial.py -q` → exit code 0 (브루트포스 일치) | [ ] |
 | A6 | sim step 결정성 | `python -m pytest tests/test_sim_step.py -q` → exit code 0 (동일 시드 2회 일치) | [ ] |
 | A7 | 무기 최근접+타이브레이크 결정적 | `python -m pytest tests/test_weapons.py -q` → exit code 0 (최저 id 타이브레이크 단언 포함) | [ ] |
-| A8 | 데미지·경험치·레벨업 1택 | `python -m pytest tests/test_damage.py tests/test_leveling.py -q` → exit code 0 (`roll_choices` 길이 1, `accrue_xp` 불변) | [ ] |
+| A8 | 데미지·넉백·경험치·레벨업 1택 | `python -m pytest tests/test_damage.py tests/test_leveling.py -q` → exit code 0 (`roll_choices` 길이 1, `accrue_xp` 불변, `knockback` 방향·크기 단언) | [ ] |
 | A9 | rules 계층 blessed 비의존 | `grep -rEn 'import blessed\|from blessed' terminal_vs/rules/ terminal_vs/sim/ terminal_vs/world.py` → 0건 | [ ] |
 | A10 | 헤드리스 통합 한 판 폐쇄 | `python -m pytest tests/test_integration_run.py -q` → exit code 0 (레벨업 1회 발생 + 시드 일치) | [ ] |
 | A11 | 전체 헤드리스 테스트 | `python -m pytest tests/ -q` → exit code 0 | [ ] |

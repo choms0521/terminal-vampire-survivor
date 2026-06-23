@@ -335,13 +335,17 @@ def accrue_meta(old_meta: MetaState, run_result: RunResult) -> MetaState:
 # sim/spawn.py — Phase 2의 director_params(순수) / spawn_enemies(제자리) 2분할을
 # 유지한 채 보스 분기만 얹는다 (P2 함수 재사용, 새 디렉터 함수 추가 없음).
 
-def director_params(elapsed_sec: float, prev_elapsed: float, defs: "BalanceDefs") -> SpawnParams:
-    """Phase 2 순수 함수 확장: 일반 스폰 파라미터 + 보스 스폰 판정.
+# Phase 2 baseline: director_params(elapsed_sec, defs) / SpawnParams(boss_due 필드 없음).
+# Phase 4 확장(상위호환): prev_elapsed를 기본값 인자로 덧붙이고 SpawnParams에 boss_due 필드를 더한다.
+def director_params(elapsed_sec: float, defs: "BalanceDefs",
+                    prev_elapsed: float = 0.0) -> SpawnParams:
+    """Phase 2 순수 함수를 보스 판정으로 확장. prev_elapsed에 기본값을 둬
+    Phase 2의 2-arg 호출부와 하위호환을 유지한다(X2식 phase-간 일반화).
     보스 스폰 시각은 balance.toml [director].boss_spawn_times(밸런스 상수)에서 읽는다."""
     params = _base_spawn_params(elapsed_sec, defs)            # 기존 Phase 2 순수 산출
     boss_due = any(prev_elapsed < t <= elapsed_sec            # 직전~현재 틱 사이 임계 통과
                    for t in defs.director.boss_spawn_times)
-    return params._replace(boss_due=boss_due)                 # 순수: 새 객체 반환
+    return params._replace(boss_due=boss_due)                 # SpawnParams.boss_due (Phase 4 확장 필드)
 
 def spawn_enemies(state, params: SpawnParams, world, rng) -> None:
     """Phase 2 제자리 함수 확장: 일반 적 + (params.boss_due & 미생존) 시 보스 1기."""
