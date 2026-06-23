@@ -6,7 +6,7 @@ enemies pour in while you collect gems, level up, and combine weapons into
 powerful evolutions — all rendered in the terminal with truecolor ASCII.
 
 > **Status: planning.** No playable build yet. The design and technical plan
-> lives in [`docs/plans/work-plan-v1.md`](docs/plans/work-plan-v1.md).
+> lives in [`docs/plan/2026-06-23/work-plan-v1.md`](docs/plan/2026-06-23/work-plan-v1.md).
 
 ## Vision
 
@@ -30,7 +30,7 @@ python3 -m venv .venv
 
 ## Documentation
 
-- [Master design & technical plan](docs/plans/work-plan-v1.md)
+- [Master design & technical plan](docs/plan/2026-06-23/work-plan-v1.md)
 
 ## License
 
