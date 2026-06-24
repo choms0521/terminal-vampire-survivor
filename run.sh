@@ -2,7 +2,8 @@
 # run.sh - launch terminal_vs (Phase 1 entry).
 #
 # Activates a local virtualenv if present (.venv or venv), then runs the package
-# entry point. The Phase 1 entry is minimal until the Day 5 game loop lands.
+# entry point, which starts the Phase 1 game loop (move, auto-fight, level up).
+# Quit in-game with 'q' or ESC.
 set -euo pipefail
 
 cd "$(dirname "$0")"

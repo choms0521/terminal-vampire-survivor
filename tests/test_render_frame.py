@@ -61,6 +61,18 @@ def test_offscreen_entity_is_culled():
     assert "z" not in glyphs  # the off-screen enemy glyph is absent
 
 
+def test_floor_cells_are_uncolored():
+    """Floor cells carry no color so the emitter emits no SGR per empty cell
+    (master 3.3 byte budget). Guards against re-coloring the floor."""
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    grid = compose_cells(state, state.camera, cfg)
+    # A corner cell is floor (the player is centered; a fresh run has no enemies).
+    glyph, color = grid[0][0]
+    assert glyph == " "
+    assert color == ""  # uncolored -> the emitter returns a bare glyph (no SGR)
+
+
 def test_grid_dimensions_are_fixed():
     """The grid is exactly viewport_h rows of viewport_w cells."""
     cfg = make_config()

@@ -20,9 +20,13 @@ from .config import Config
 class Rect:
     """Visible world-coordinate bounds (inclusive-min, exclusive-max convention).
 
-    Fields are world coordinates (floats), not cells. spawn (off-screen ring
-    math) and culling consume this. ``min_x <= wx < max_x`` and
-    ``min_y <= wy < max_y`` describe the visible region around the camera.
+    Fields are world coordinates (floats), not cells. This is a CONTINUOUS
+    APPROXIMATION of the visible region around the camera, used for spawn
+    (off-screen ring math) and far-despawn distance checks. It is NOT the
+    authoritative visibility test: ``is_visible`` quantizes via ``world_to_cell``
+    (with rounding), so a coordinate within ``min_x <= wx < max_x`` /
+    ``min_y <= wy < max_y`` near an edge can still round to a cell just outside
+    the viewport. Use ``is_visible`` for exact cell-based culling.
     """
 
     min_x: float

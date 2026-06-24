@@ -32,6 +32,12 @@ from .hud import hud_lines
 # Empty floor cell. A single space both reads as "no entity here" and, once rows
 # are padded to the fixed width, erases any ghost glyph left from a prior frame.
 _FLOOR_GLYPH = " "
+# Floor cells are UNCOLORED: the empty color name is not in _KNOWN_COLORS, so the
+# blessed emitter returns the bare space with no SGR escape. Coloring the
+# thousands of empty floor cells would emit a color escape per cell and inflate
+# the per-frame byte count (master plan section 3.3, the throughput bottleneck)
+# for no visual gain (a space has no foreground glyph to color).
+_FLOOR_COLOR = ""
 
 # Known entity color names (the entity ``.color`` strings from sim.state). The
 # blessed emitter maps these to terminal escapes; an unknown name falls back to
@@ -53,7 +59,7 @@ def compose_cells(state, cam: Camera, cfg: Config) -> list[list[tuple[str, str]]
     width = cfg.viewport_w
     height = cfg.viewport_h
     grid: list[list[tuple[str, str]]] = [
-        [(_FLOOR_GLYPH, "white") for _ in range(width)] for _ in range(height)
+        [(_FLOOR_GLYPH, _FLOOR_COLOR) for _ in range(width)] for _ in range(height)
     ]
 
     def _place(entity) -> None:

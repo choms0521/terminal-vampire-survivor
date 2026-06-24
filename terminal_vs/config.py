@@ -195,12 +195,16 @@ def _build_balance(balance_data: dict) -> BalanceTable:
     )
     magnet_range = _f(pickup_data, "magnet_range", _PICKUP_DEFAULTS)
 
-    # Range validation on balance constants.
+    # Range validation on balance constants (all must be strictly positive: a
+    # zero/negative weapon.damage means enemies never die, and a non-positive
+    # enemy.spawn_weight makes spawn weighting nonsensical).
     _require_positive("weapon.cooldown", weapon.cooldown)
+    _require_positive("weapon.damage", weapon.damage)
     _require_positive("weapon.projectile_speed", weapon.projectile_speed)
     _require_positive("weapon.projectile_ttl", weapon.projectile_ttl)
     _require_positive("enemy.hp", enemy.hp)
     _require_positive("enemy.move_speed", enemy.move_speed)
+    _require_positive("enemy.spawn_weight", enemy.spawn_weight)
     _require_positive("xp.base", xp.base)
     _require_positive("xp.growth", xp.growth)
     _require_positive("pickup.magnet_range", magnet_range)

@@ -182,6 +182,23 @@ def test_out_of_range_balance_raises_valueerror(tmp_path):
     assert "config/balance.toml" in str(exc.value)
 
 
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        ("= 12.0", "= 0"),                       # weapon.damage -> 0
+        ("spawn_weight = 2.0", "spawn_weight = 0"),  # enemy.spawn_weight -> 0
+        ("spawn_weight = 2.0", "spawn_weight = -1"),  # enemy.spawn_weight -> negative
+    ],
+)
+def test_nonpositive_balance_field_raises(tmp_path, old, new):
+    """weapon.damage and enemy.spawn_weight must be strictly positive."""
+    assert old in VALID_BALANCE  # guard: the mutated line actually exists
+    tuning = _write(tmp_path / "tuning.toml", VALID_TUNING)
+    balance = _write(tmp_path / "balance.toml", VALID_BALANCE.replace(old, new))
+    with pytest.raises(ValueError):
+        load_config(tuning, balance)
+
+
 def test_invalid_render_mode_raises_valueerror(tmp_path):
     """A render_mode outside {'full','diff'} raises a clear ValueError."""
     bad_tuning = VALID_TUNING.replace('render_mode  = "full"', 'render_mode  = "fancy"')
