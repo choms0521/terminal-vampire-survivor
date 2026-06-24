@@ -174,10 +174,12 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
                 render_frame(term, sim, sim.camera, cfg, max_hp)
 
         elif mode == _MODE_LEVELUP:
-            # Simulation is PAUSED while the overlay is up. A confirm key consumes
-            # all banked level-ups (drain), then returns to play with the clock
-            # reset so the paused wall-time does not become a catch-up backlog.
-            render_frame(term, sim, sim.camera, cfg, max_hp)
+            # The frame was painted once when this mode was entered (the play
+            # branch renders on the play->levelup transition). The sim is PAUSED,
+            # so nothing changes until a confirm key -- no per-poll repaint (which
+            # would spam terminal IO at the poll rate). A confirm consumes all
+            # banked level-ups (drain), then returns to play with the clock reset
+            # so the paused wall-time does not become a catch-up backlog.
             if _is_confirm(key):
                 _drain_levelups(sim, cfg, rng)
                 mode = _MODE_PLAY
@@ -185,13 +187,14 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
                 accumulator = 0.0
 
         elif mode == _MODE_PAUSE:
-            render_frame(term, sim, sim.camera, cfg, max_hp)
+            # Painted once on entry (the play branch renders before pausing);
+            # static while paused, so no per-poll repaint.
             if str(key) == _PAUSE_KEY or _is_confirm(key):
                 mode = _MODE_PLAY
                 last = monotonic()
                 accumulator = 0.0
 
         elif mode == _MODE_GAMEOVER:
-            render_frame(term, sim, sim.camera, cfg, max_hp)
-            # Stay on the game-over frame until a quit key is pressed (handled at
-            # the top of the loop); no further simulation runs.
+            # Painted once on entry; the frozen game-over frame stays until a quit
+            # key (handled at the top of the loop). No further work, no repaint.
+            pass

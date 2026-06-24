@@ -76,6 +76,9 @@ def step(state: SimState, intent: Intent, cfg: Config, rng: random.Random) -> No
     # Each stage carries an impl/defer marker. "impl" stages are fully built for
     # Phase 1; the trailing note names the extension deferred to Phase 2.
     _apply_input(state, intent, cfg, dt)            # 1) input: impl 8-dir; analog/dash deferred Phase 2
+    state.camera.follow(state.player)               #    re-center on the player after the input move so
+                                                    #    spawn/despawn below use THIS tick's viewport, not a
+                                                    #    1-tick-stale one (followed again at stage 10 post-knockback)
     maybe_spawn(state, cfg, rng)                    # 2) spawn: minimal flat rate; director curve placeholder, deferred Phase 2
     _move_enemies_toward_player(state, cfg, dt)     # 3) enemy AI: impl chase; 2nd enemy type / flocking deferred Phase 2
     _fire_weapons(state, cfg, dt)                   # 4) weapon: impl dagger cooldown+fire; multi-weapon/evolution deferred Phase 2
@@ -84,7 +87,7 @@ def step(state: SimState, intent: Intent, cfg: Config, rng: random.Random) -> No
     _drop_xp_on_death(state, rng)                   # 7) death->xp drop: impl fixed gem; drop-table variety deferred Phase 2
     _collect_pickups(state, cfg)                    # 8) pickup->xp->level flag: impl magnet collect; magnet upgrades deferred Phase 2
     _cleanup_dead_and_far(state, cfg)               # 9) cleanup: impl dead removal + far despawn; entity-cap pressure tuning deferred Phase 2
-    state.camera.follow(state.player)               # 10) camera: impl follow; screen-shake/lerp deferred Phase 2
+    state.camera.follow(state.player)               # 10) camera: final follow after knockback so the rendered frame is centered on the player; screen-shake/lerp deferred Phase 2
 
     state.elapsed += dt
     # NOTE: evolution / multi-weapon / hazard whole-stages are absent in Phase 1
