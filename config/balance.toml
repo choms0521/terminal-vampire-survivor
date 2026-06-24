@@ -1,0 +1,31 @@
+# config/balance.toml - game-balance constants (Phase 1 vertical slice).
+#
+# These are tunable game-design values: weapon, enemy, xp curve, and pickup
+# constants. Unlike config/tuning.toml (performance operating point), these are
+# balance dials that can be edited without code changes (master plan section 5.5).
+#
+# config.py loads this file and falls back to code defaults for any missing key,
+# so the game still runs if a section or key is absent. Starting values below are
+# initial Phase 1 estimates and will be balanced in later phases.
+
+# Weapon: the single Phase 1 weapon (dagger) - auto-fires at the nearest enemy.
+[weapon]
+cooldown         = 0.6    # seconds between auto-fire shots
+damage           = 10.0   # damage per projectile hit
+projectile_speed = 18.0   # world units per second
+projectile_ttl   = 1.2    # projectile lifetime in seconds
+
+# Enemy: the single Phase 1 enemy type - chases the player.
+[enemy]
+hp           = 20.0  # starting hit points
+move_speed   = 4.0   # world units per second toward the player
+spawn_weight = 1.0   # relative spawn weight (flat ratio in Phase 1)
+
+# Experience curve: xp to clear level L is base * growth ** (L - 1).
+[xp]
+base   = 5.0  # xp needed to clear level 1
+growth = 1.5  # geometric multiplier per level
+
+# Pickup: xp-gem auto-collect behavior.
+[pickup]
+magnet_range = 4.0  # auto-collect radius in world units

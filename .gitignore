@@ -32,3 +32,6 @@ logs/
 
 # OMC internal working state
 .omc/
+
+# copilot review skill cycle state
+.copilot-review-state.json
