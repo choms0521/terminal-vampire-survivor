@@ -18,6 +18,7 @@ from terminal_vs.render.frame import (
     compose_cells,
     compose_frame,
 )
+from terminal_vs.rules.leveling import Choice
 from terminal_vs.sim.state import Enemy, make_enemy, new_run
 
 from .conftest import make_config
@@ -143,3 +144,70 @@ def test_compose_frame_is_nonempty():
     frame = compose_frame(state, state.camera, cfg, _identity_colorize, max_hp=100.0)
     assert len(frame) > 0
     assert "\n" in frame
+
+
+def test_compose_frame_draws_draft_overlay_when_pending():
+    """A pending level-up draft is drawn into the frame (regression: the overlay
+    was rolled into ``pending_choices`` but never rendered -- an invisible menu).
+
+    Guards the wiring that overlays ``draft_overlay_lines`` onto the composed
+    frame whenever a draft is pending, so the player can see the numbered cards.
+    """
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    state.pending_choices = (
+        Choice(kind="weapon_upgrade", label="dagger Lv2", target="dagger"),
+        Choice(kind="passive", label="attack_speed Lv1", target="attack_speed"),
+    )
+    frame = compose_frame(state, state.camera, cfg, _identity_colorize, max_hp=100.0)
+
+    assert "LEVEL UP -- choose:" in frame
+    assert "1) dagger Lv2" in frame
+    assert "2) attack_speed Lv1" in frame
+    # The fixed-width invariant must survive the overlay (no row grows/shrinks).
+    rows = frame.split("\n")
+    assert len(rows) == cfg.viewport_h
+    assert all(len(row) == cfg.viewport_w for row in rows)
+
+
+def test_compose_frame_no_draft_overlay_when_not_pending():
+    """With no pending draft, the frame carries no draft overlay text."""
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))  # fresh run: pending_choices == ()
+    frame = compose_frame(state, state.camera, cfg, _identity_colorize, max_hp=100.0)
+    assert "LEVEL UP" not in frame
+
+
+def test_compose_frame_draft_long_label_is_clipped():
+    """A draft card label wider than the viewport is clipped, never overflows.
+
+    Locks in the fixed-width invariant for the overlay path: a too-long label is
+    clipped to viewport_w (not wrapped onto a new row), so every row stays exactly
+    viewport_w wide.
+    """
+    cfg = make_config(viewport_w=20, viewport_h=12)
+    state = new_run(cfg, random.Random(0))
+    state.pending_choices = (
+        Choice(kind="passive", label="x" * 60, target="x"),  # far wider than 20
+    )
+    frame = compose_frame(state, state.camera, cfg, _identity_colorize, max_hp=100.0)
+    rows = frame.split("\n")
+    assert len(rows) == cfg.viewport_h
+    assert all(len(row) == cfg.viewport_w for row in rows)  # clipped, no overflow
+
+
+def test_compose_frame_draft_hidden_on_degenerate_viewport():
+    """When the viewport is too short to fit any draft row below the HUD, the
+    overlay is skipped without error and the HUD rows are preserved."""
+    cfg = make_config(viewport_w=40, viewport_h=3)  # exactly the HUD height
+    state = new_run(cfg, random.Random(0))
+    state.pending_choices = (
+        Choice(kind="weapon_upgrade", label="dagger Lv2", target="dagger"),
+        Choice(kind="passive", label="attack_speed Lv1", target="attack_speed"),
+    )
+    frame = compose_frame(state, state.camera, cfg, _identity_colorize, max_hp=100.0)
+    rows = frame.split("\n")
+    assert len(rows) == cfg.viewport_h
+    assert all(len(row) == cfg.viewport_w for row in rows)
+    assert rows[0].startswith("HP ")  # HUD intact, not clobbered by the draft
+    assert "LEVEL UP" not in frame  # no room below the HUD -> overlay hidden
