@@ -128,7 +128,9 @@ class Config:
     viewport_h: int       # viewport height in cells
     entity_cap: int       # max simultaneous entities
     aspect_x: float       # horizontal cell aspect compensation factor (section 3.1)
-    render_mode: str      # "full" | "diff"
+    render_mode: str      # "full" | "diff" (Phase 1 emits full frames only; the
+                          #   diff renderer is deferred to Phase 2, so this field
+                          #   is loaded/validated but not yet consumed by render)
     balance: BalanceTable  # game-balance constants from balance.toml
 
 

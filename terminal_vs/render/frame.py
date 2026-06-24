@@ -18,6 +18,9 @@ drawn on top of the entity layers; the HUD overlays everything last.
 Culling: only entities that ``world.is_visible`` are placed, and each glyph's
 cell is bounds-checked, so off-screen entities cost nothing and never overflow
 the grid.
+
+Phase 1 always emits a full frame; ``cfg.render_mode`` ("full" | "diff") is not
+consumed here yet -- the diff renderer is deferred to Phase 2.
 """
 
 from __future__ import annotations

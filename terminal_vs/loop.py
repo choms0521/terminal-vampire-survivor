@@ -128,6 +128,9 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
     # Last movement intent: spec section 3.3 uses the last polled key's intent
     # vector, so an empty poll keeps the player moving in the last direction.
     intent = Intent(0, 0)
+    # Paint the starting frame once so the player sees the initial state before
+    # the first simulation step.
+    render_frame(term, sim, sim.camera, cfg, max_hp)
 
     while True:
         key = term.inkey(timeout=cfg.poll_timeout)
@@ -162,7 +165,13 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
             elif sim.level_up_pending:
                 mode = _MODE_LEVELUP
 
-            render_frame(term, sim, sim.camera, cfg, max_hp)
+            # Repaint only when the sim actually advanced or the mode just
+            # changed. The input poll runs far faster than sim_tps, so emitting
+            # the full frame on every idle poll wastes IO and (observed) starves
+            # the sim, making it run slower than wall-clock. Phase 1 keeps the
+            # simple full-frame emit; a diff renderer is deferred to Phase 2.
+            if steps > 0 or mode != _MODE_PLAY:
+                render_frame(term, sim, sim.camera, cfg, max_hp)
 
         elif mode == _MODE_LEVELUP:
             # Simulation is PAUSED while the overlay is up. A confirm key consumes

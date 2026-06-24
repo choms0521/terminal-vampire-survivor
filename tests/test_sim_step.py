@@ -78,6 +78,16 @@ def test_different_seed_diverges():
     assert snap_a != snap_c
 
 
+def test_player_out_runs_enemies():
+    # The player's base move speed must exceed the enemy move speed so kiting
+    # works (the core survival loop). Guards the _PLAYER_SPEED_MULT > 1 invariant
+    # against a silent regression (e.g. resetting the multiplier to 1.0).
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    step(state, Intent(1, 0), cfg, random.Random(0))
+    assert abs(state.player.vx) > cfg.balance.enemy.move_speed
+
+
 def test_id_sequence_is_monotonic_and_contiguous():
     cfg = make_config()
     rng = random.Random(42)
