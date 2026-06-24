@@ -1,0 +1,20 @@
+# config/tuning.toml - operational constants (Phase 0 measured operating point).
+#
+# PROVISIONAL VALUES. Every value below is a placeholder. The real operating
+# point is derived from the Phase 0 render-throughput measurement: run the
+# harness on a real terminal (see bench/RUNBOOK.md), then apply the decision
+# rules in bench/results/decision.md and overwrite these values.
+#
+# The keys exist now so config.py (Phase 1) and downstream phases can load and
+# validate the schema, but the *values* must be confirmed by measurement before
+# Phase 1 relies on them. Do not hardcode these numbers elsewhere - reference
+# this file (master plan section 5.5).
+
+sim_tps      = 20       # PROVISIONAL - simulation ticks/sec (master section 4: tentative 15-20)
+viewport_w   = 100      # PROVISIONAL - viewport width in cells
+viewport_h   = 30       # PROVISIONAL - viewport height in cells
+entity_cap   = 200      # PROVISIONAL - max simultaneous entities (N)
+render_mode  = "diff"   # PROVISIONAL - "full" | "diff"
+poll_timeout = 0.005    # PROVISIONAL - input poll timeout (sec)
+max_catchup  = 5        # PROVISIONAL - max sim catch-up ticks per render frame
+aspect_x     = 2        # PROVISIONAL - horizontal cell aspect compensation factor
