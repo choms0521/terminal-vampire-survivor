@@ -12,11 +12,13 @@ from __future__ import annotations
 import random
 
 from terminal_vs.render.frame import (
+    _KNOWN_COLORS,
     _identity_colorize,
+    _term_colorize,
     compose_cells,
     compose_frame,
 )
-from terminal_vs.sim.state import Enemy, new_run
+from terminal_vs.sim.state import Enemy, make_enemy, new_run
 
 from .conftest import make_config
 
@@ -71,6 +73,39 @@ def test_floor_cells_are_uncolored():
     glyph, color = grid[0][0]
     assert glyph == " "
     assert color == ""  # uncolored -> the emitter returns a bare glyph (no SGR)
+
+
+def test_swarm_enemy_renders_with_known_color():
+    """A swarm enemy's "magenta" color is emitted (now a known color).
+
+    The grid carries the swarm's glyph + color, and the blessed emitter wraps a
+    known color in an SGR escape rather than dropping it (Chunk 1 review
+    follow-up: magenta was added to _KNOWN_COLORS). Guards against the swarm
+    rendering uncolored.
+    """
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    swarm_def = cfg.defs.enemies["swarm"]
+    # Place a swarm on the player's cell-neighborhood so it is visible.
+    state.enemies.append(
+        make_enemy(state.alloc_id(), state.player.x + 1.0, state.player.y, swarm_def)
+    )
+    grid = compose_cells(state, state.camera, cfg)
+    colors = {color for row in grid for _, color in row}
+    assert swarm_def.color in colors  # the swarm's color is present in the grid
+    assert swarm_def.color in _KNOWN_COLORS  # and the emitter knows it
+
+    # The emitter wraps a known color (non-empty marker) instead of the bare glyph.
+    class _FakeTerm:
+        normal = "<<>>"
+
+        def __getattr__(self, name: str) -> str:
+            return f"<{name}>"
+
+    colorize = _term_colorize(_FakeTerm())
+    emitted = colorize(swarm_def.glyph, swarm_def.color)
+    assert emitted != swarm_def.glyph  # colorized, not the bare glyph
+    assert swarm_def.color in emitted
 
 
 def test_grid_dimensions_are_fixed():

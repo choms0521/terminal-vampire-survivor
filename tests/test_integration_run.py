@@ -18,32 +18,22 @@ from __future__ import annotations
 
 import random
 
-from terminal_vs.rules import leveling
+from terminal_vs.loop import _drain_levelups
 from terminal_vs.sim.state import Intent, new_run
 from terminal_vs.sim.step import step
 
 from .conftest import make_config
 
 # Fixed seed and tick cap. The measured tick to reach level >= 2 at this seed is
-# ~301 (with the drain mirror), so 400 is a safe upper bound that still proves
-# the chain closes well within the run. ``N_TICKS`` is a test budget, not a
-# perf-tuning number, so a literal is fine here (tests are not perf-gated).
+# ~907 (with the drain mirror) -- the Phase 2 director starts slower than the
+# Phase 1 flat spawner (minute-0 spawns are sparse), so the chain closes later
+# than Phase 1's ~301. ``enemy_weights`` is now name-sorted (load-bearing for
+# determinism), which shifts the walker/swarm spawn composition vs the old
+# dict-insertion order and moves the closure tick from ~521 to ~907.
+# 1100 is a safe upper bound that still proves the chain closes.
+# ``N_TICKS`` is a test budget, not a perf-tuning number, so a literal is fine.
 _SEED = 42
-_N_TICKS = 400
-
-
-def _drain_levelups(state, cfg, rng) -> None:
-    """Mirror loop.run's level-up drain headlessly.
-
-    Step only SETS ``level_up_pending``; the loop clears it by consuming every
-    banked level (one ``apply_choice`` per level) until pending is false, then
-    setting the flag false. This mirror keeps the headless run faithful to the
-    interactive loop so the integration result matches play.
-    """
-    while leveling.level_up_pending(state.level_state, cfg):
-        choice = leveling.roll_choices(state.level_state, cfg, rng, n=1)[0]
-        state.level_state = leveling.apply_choice(state.level_state, choice, cfg)
-    state.level_up_pending = False
+_N_TICKS = 1100
 
 
 def _snapshot(state) -> tuple:
@@ -65,7 +55,7 @@ def _snapshot(state) -> tuple:
         (pk.id, round(pk.x, 9), round(pk.y, 9), round(pk.xp, 9))
         for pk in state.pickups
     )
-    level = (state.level_state.level, round(state.level_state.xp, 9))
+    level = (state.build.level, round(state.build.xp, 9))
     return (
         player,
         enemies,
@@ -97,7 +87,7 @@ def _drive_run(seed: int, n_ticks: int):
         if state.level_up_pending:
             saw_pending = True
             _drain_levelups(state, cfg, rng)
-        if ticks_to_level2 is None and state.level_state.level >= 2:
+        if ticks_to_level2 is None and state.build.level >= 2:
             ticks_to_level2 = tick + 1
     return _snapshot(state), saw_pending, ticks_to_level2
 

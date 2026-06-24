@@ -34,7 +34,7 @@ def _snapshot(state) -> tuple:
         (pk.id, round(pk.x, 9), round(pk.y, 9), round(pk.xp, 9))
         for pk in state.pickups
     )
-    level = (state.level_state.level, round(state.level_state.xp, 9))
+    level = (state.build.level, round(state.build.xp, 9))
     return (
         player,
         enemies,
@@ -79,13 +79,15 @@ def test_different_seed_diverges():
 
 
 def test_player_out_runs_enemies():
-    # The player's base move speed must exceed the enemy move speed so kiting
-    # works (the core survival loop). Guards the _PLAYER_SPEED_MULT > 1 invariant
-    # against a silent regression (e.g. resetting the multiplier to 1.0).
+    # The player's base move speed must exceed the WALKER (basic chaser) move
+    # speed so kiting works (the core survival loop). Guards the
+    # _PLAYER_SPEED_MULT > 1 invariant against a silent regression (e.g. resetting
+    # the multiplier to 1.0). The swarm enemy is intentionally faster than the
+    # player by design, so the invariant is measured against the walker.
     cfg = make_config()
     state = new_run(cfg, random.Random(0))
     step(state, Intent(1, 0), cfg, random.Random(0))
-    assert abs(state.player.vx) > cfg.balance.enemy.move_speed
+    assert abs(state.player.vx) > cfg.defs.enemies["walker"].move_speed
 
 
 def test_id_sequence_is_monotonic_and_contiguous():
@@ -106,7 +108,7 @@ def test_run_progresses_toward_levelup_with_default_seed():
     rng = random.Random(42)
     state = new_run(cfg, rng)
     saw_pending = False
-    for _ in range(600):
+    for _ in range(1100):
         step(state, Intent(0, 0), cfg, rng)
         if state.level_up_pending:
             saw_pending = True

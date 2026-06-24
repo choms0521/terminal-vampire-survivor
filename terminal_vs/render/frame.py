@@ -39,10 +39,13 @@ _FLOOR_GLYPH = " "
 # for no visual gain (a space has no foreground glyph to color).
 _FLOOR_COLOR = ""
 
-# Known entity color names (the entity ``.color`` strings from sim.state). The
-# blessed emitter maps these to terminal escapes; an unknown name falls back to
-# the plain glyph so the emitter can never raise on unexpected data.
-_KNOWN_COLORS = ("white", "red", "yellow", "green")
+# Known entity color names (the entity ``.color`` strings from sim.state, plus
+# the enemy colors from balance.toml). The blessed emitter maps these to terminal
+# escapes; an unknown name falls back to the plain glyph so the emitter can never
+# raise on unexpected data. "magenta" is the swarm enemy color, added so the
+# swarm renders colored (Chunk 1 review follow-up); "cyan" is reserved for future
+# enemy/effect colors.
+_KNOWN_COLORS = ("white", "red", "yellow", "green", "magenta", "cyan")
 
 
 def compose_cells(state, cam: Camera, cfg: Config) -> list[list[tuple[str, str]]]:

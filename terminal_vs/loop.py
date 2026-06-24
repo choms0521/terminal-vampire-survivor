@@ -1,4 +1,4 @@
-"""terminal_vs.loop - fixed-timestep game loop (Day 5).
+"""terminal_vs.loop - fixed-timestep game loop (Phase 2).
 
 Implements the master plan appendix-A loop: a fixed-timestep simulation driven by
 a time accumulator, with a small mode machine (``play`` / ``levelup`` / ``pause``
@@ -12,24 +12,27 @@ the input poll uses ``cfg.poll_timeout``, and the catch-up drain is capped at
 ``cfg.max_catchup`` sub-steps per frame. No numeric literal stands in for any of
 these.
 
-Level-up drain (master section 8, the leveling contract): ``step`` SETS
-``state.level_up_pending`` when xp crosses a threshold and never clears it. On a
-confirm key in ``levelup`` mode the loop consumes the level-up by rolling a
-choice and applying it (rebinding ``state.level_state``), then RE-CHECKS
-``leveling.level_up_pending`` -- a single large xp grant can bank several levels,
-so the loop keeps applying one choice per banked level until pending is false,
-then clears ``state.level_up_pending`` and returns to ``play``.
+Level-up draft (master section 8, the leveling contract): ``step`` SETS
+``state.level_up_pending`` when xp crosses a threshold and never clears it. On
+entering ``levelup`` mode the loop rolls ``cfg.defs.leveling.draft_choices`` draft
+cards into ``state.pending_choices`` and the overlay shows them. A number key
+``1..N`` selects a card; :func:`apply_draft_selection` applies it, advances the
+level (carrying the xp overflow), reconciles the per-weapon cooldowns (an
+evolution swaps weapons), then re-checks ``level_up_pending``: a single large xp
+grant can bank several levels, so the helper re-rolls the next draft and the loop
+stays in ``levelup`` until pending clears, then returns to ``play``.
 """
 
 from __future__ import annotations
 
 import random
+from dataclasses import replace
 from time import monotonic
 
 from .config import Config
 from .render.frame import render_frame
 from .rules import leveling
-from .sim.state import Intent, new_run
+from .sim.state import Intent, new_run, reconcile_weapon_cooldowns
 from .sim.step import step
 
 # Mode names for the loop state machine.
@@ -47,8 +50,6 @@ _KEY_TO_INTENT = {
 }
 # Keys that quit the loop (a bare 'q' or the ESC key).
 _QUIT_KEYS = ("q", "Q")
-# Keys that confirm a level-up choice / unpause.
-_CONFIRM_KEYS = (" ", "\n", "\r")
 # Key that toggles pause in play mode.
 _PAUSE_KEY = "p"
 
@@ -56,8 +57,8 @@ _PAUSE_KEY = "p"
 def _intent_from_key(key) -> Intent | None:
     """Map a polled blessed key to a movement Intent, or None if not a move key.
 
-    Arrow keys map to 8-direction-capable Intents (Phase 1 uses 4 of the 8). A
-    key that is not an arrow returns None so the caller can keep the last intent.
+    Arrow keys map to 8-direction-capable Intents. A key that is not an arrow
+    returns None so the caller can keep the last intent.
     """
     if key is None:
         return None
@@ -77,30 +78,83 @@ def _is_quit(key) -> bool:
     return str(key) in _QUIT_KEYS
 
 
-def _is_confirm(key) -> bool:
-    """True if the key confirms a level-up choice or unpauses."""
+def _selection_index_from_key(key, n: int) -> int | None:
+    """Map a number key '1'..'N' to a 0-based choice index, or None.
+
+    ``n`` is how many cards are on offer; a digit outside ``1..n`` (or a non-digit
+    key) returns None so the loop ignores it and keeps waiting for a valid pick.
+    """
     if key is None:
-        return False
-    name = getattr(key, "name", None)
-    if name in ("KEY_ENTER",):
-        return True
-    return str(key) in _CONFIRM_KEYS
+        return None
+    text = str(key)
+    if len(text) == 1 and text.isdigit():
+        value = int(text)
+        if 1 <= value <= n:
+            return value - 1
+    return None
+
+
+def _roll_pending(state, cfg: Config, rng: random.Random) -> None:
+    """Roll a fresh draft into ``state.pending_choices`` for the current build.
+
+    The draft size is the balance ``draft_choices``. Called when entering
+    ``levelup`` and after each consumed level that leaves more banked (so the next
+    level's draft reflects the just-applied build).
+    """
+    state.pending_choices = leveling.roll_choices(
+        state.build, cfg.defs, rng, cfg.defs.leveling.draft_choices
+    )
+
+
+def apply_draft_selection(
+    state, index: int, cfg: Config, rng: random.Random
+) -> None:
+    """Apply the chosen draft card, advance one level, and continue or finish.
+
+    Consumes exactly one banked level (master section 8): apply the selected
+    ``state.pending_choices[index]`` to the build (``apply_choice`` does NOT touch
+    level/xp), then advance the level by one and subtract the cleared level's
+    threshold from xp (clamped at 0). Reconcile the per-weapon cooldowns so an
+    evolution's weapon swap is reflected (the base weapon's cooldown is dropped,
+    the result weapon gets a fresh 0.0). Then re-check ``level_up_pending``: if
+    more levels are banked, re-roll the next draft and stay in ``levelup``;
+    otherwise clear the pending flag and ``pending_choices`` so the loop returns
+    to ``play``. The interactive loop and the headless drain both call this, so
+    the level/xp/cooldown bookkeeping has a single home.
+    """
+    if not state.pending_choices or not (0 <= index < len(state.pending_choices)):
+        return
+    choice = state.pending_choices[index]
+    threshold = leveling.xp_for_level(state.build.level, cfg.defs)
+    new_build = leveling.apply_choice(state.build, choice)
+    state.build = replace(
+        new_build,
+        level=new_build.level + 1,
+        xp=max(0.0, new_build.xp - threshold),
+    )
+    reconcile_weapon_cooldowns(state)
+    if leveling.level_up_pending(state.build, cfg.defs):
+        _roll_pending(state, cfg, rng)
+    else:
+        state.level_up_pending = False
+        state.pending_choices = ()
 
 
 def _drain_levelups(state, cfg: Config, rng: random.Random) -> None:
-    """Consume every banked level-up, then clear the pending flag.
+    """Consume every banked level-up by auto-picking the first card each time.
 
-    Per the leveling contract, ``step`` only SETS ``level_up_pending``; the loop
-    clears it. One ``apply_choice`` consumes exactly one level, so a single big xp
-    grant that banked several levels needs several applications. Loop while
-    ``leveling.level_up_pending`` is true on the rebound ``level_state``, applying
-    one rolled choice per iteration, then set the flag false. ``roll_choices``
-    does not consume rng in Phase 1, so the drain does not perturb determinism.
+    The headless drain seam (used by tests and the integration mirror): when a
+    level-up is pending it rolls the draft (if not already rolled) and applies
+    index 0 via :func:`apply_draft_selection`, repeating until pending clears.
+    Deterministic for a fixed rng. The interactive loop instead waits for a
+    number key, but routes the actual application through the same helper.
     """
-    while leveling.level_up_pending(state.level_state, cfg):
-        choice = leveling.roll_choices(state.level_state, cfg, rng, n=1)[0]
-        state.level_state = leveling.apply_choice(state.level_state, choice, cfg)
+    while leveling.level_up_pending(state.build, cfg.defs):
+        if not state.pending_choices:
+            _roll_pending(state, cfg, rng)
+        apply_draft_selection(state, 0, cfg, rng)
     state.level_up_pending = False
+    state.pending_choices = ()
 
 
 def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
@@ -125,8 +179,8 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
     accumulator = 0.0
     last = monotonic()
     mode = _MODE_PLAY
-    # Last movement intent: spec section 3.3 uses the last polled key's intent
-    # vector, so an empty poll keeps the player moving in the last direction.
+    # Last movement intent: the player keeps moving in the last direction when a
+    # poll returns no new move key.
     intent = Intent(0, 0)
     # Paint the starting frame once so the player sees the initial state before
     # the first simulation step.
@@ -164,32 +218,42 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
                 mode = _MODE_GAMEOVER
             elif sim.level_up_pending:
                 mode = _MODE_LEVELUP
+                # Roll the draft once on entering levelup so the overlay has cards
+                # to show and the number keys have a stable index to select.
+                _roll_pending(sim, cfg, rng)
 
             # Repaint only when the sim actually advanced or the mode just
             # changed. The input poll runs far faster than sim_tps, so emitting
             # the full frame on every idle poll wastes IO and (observed) starves
-            # the sim, making it run slower than wall-clock. Phase 1 keeps the
-            # simple full-frame emit; a diff renderer is deferred to Phase 2.
+            # the sim. A diff renderer is deferred to Phase 3.
             if steps > 0 or mode != _MODE_PLAY:
                 render_frame(term, sim, sim.camera, cfg, max_hp)
 
         elif mode == _MODE_LEVELUP:
             # The frame was painted once when this mode was entered (the play
             # branch renders on the play->levelup transition). The sim is PAUSED,
-            # so nothing changes until a confirm key -- no per-poll repaint (which
-            # would spam terminal IO at the poll rate). A confirm consumes all
-            # banked level-ups (drain), then returns to play with the clock reset
-            # so the paused wall-time does not become a catch-up backlog.
-            if _is_confirm(key):
-                _drain_levelups(sim, cfg, rng)
-                mode = _MODE_PLAY
-                last = monotonic()
-                accumulator = 0.0
+            # so nothing changes until a number key selects a card. A valid
+            # selection applies the card + advances the level via
+            # apply_draft_selection; if levels are still banked the helper re-rolls
+            # and we stay in levelup, otherwise it clears pending and we return to
+            # play with the clock reset so the paused wall-time does not become a
+            # catch-up backlog.
+            index = _selection_index_from_key(key, len(sim.pending_choices))
+            if index is not None:
+                apply_draft_selection(sim, index, cfg, rng)
+                if sim.level_up_pending:
+                    # More levels banked: a fresh draft is showing.
+                    render_frame(term, sim, sim.camera, cfg, max_hp)
+                else:
+                    mode = _MODE_PLAY
+                    last = monotonic()
+                    accumulator = 0.0
+                    render_frame(term, sim, sim.camera, cfg, max_hp)
 
         elif mode == _MODE_PAUSE:
             # Painted once on entry (the play branch renders before pausing);
             # static while paused, so no per-poll repaint.
-            if str(key) == _PAUSE_KEY or _is_confirm(key):
+            if str(key) == _PAUSE_KEY:
                 mode = _MODE_PLAY
                 last = monotonic()
                 accumulator = 0.0
