@@ -50,10 +50,6 @@ def sgr_truecolor(rgb: tuple[int, int, int]) -> str:
     return f"{ESC}[38;2;{r};{g};{b}m"
 
 
-def cursor_home() -> str:
-    return f"{ESC}[H"
-
-
 def cursor_move(y: int, x: int) -> str:
     """1-based row;col cursor move (CUP). Equivalent to blessed term.move_yx."""
     return f"{ESC}[{y + 1};{x + 1}H"
@@ -68,7 +64,8 @@ class BenchConfig:
     vw: int              # viewport width (cols)
     vh: int              # viewport height (rows)
     duration: float      # sustained measurement seconds (excludes 1s warmup)
-    seed: int = 1234     # deterministic glyph motion + color
+    seed: int = 1234         # deterministic glyph motion + color
+    target_fps: float = 20.0  # target FPS floor; recorded with the result row
 
 
 # --- Mutable glyph buffer: in-place advance is the ADR-001 section 6 carve-out -
@@ -165,22 +162,26 @@ def changed_cells(prev: Grid, cur: Grid) -> list[tuple[int, int, str, object]]:
 
 
 def render_full(cells: Grid) -> str:
-    """Pure: full-frame string to print after cursor home.
+    """Pure: full-frame string built by positioning each row explicitly.
 
     No screen clear; every cell (including blanks) is emitted, so rows are fixed
-    width and ghosts are overwritten (master section 3.6). Truecolor SGR is
-    emitted only when the color changes from the previous cell (last-color
-    caching), and reset at end-of-frame.
+    width and ghosts are overwritten (master section 3.6). Each row is placed
+    with an explicit cursor move instead of a trailing newline, so the frame
+    never emits a newline past the last row (which would scroll the viewport when
+    its height equals the terminal height) and never depends on terminal
+    auto-wrap. Truecolor SGR is emitted only when the color changes from the
+    previous cell (last-color caching; cursor moves do not reset SGR), and reset
+    at end-of-frame.
     """
-    out = [cursor_home()]
+    out: list[str] = []
     last_color: object = "init"          # sentinel != any rgb and != None
-    for row in cells:
+    for y, row in enumerate(cells):
+        out.append(cursor_move(y, 0))
         for char, rgb in row:
             if rgb != last_color:
                 out.append(SGR_RESET if rgb is None else sgr_truecolor(rgb))
                 last_color = rgb
             out.append(char)
-        out.append("\n")
     out.append(SGR_RESET)
     return "".join(out)
 
@@ -242,6 +243,7 @@ def summarize(frame_ms: list[float], frame_bytes: list[int], cfg: BenchConfig) -
         "mode": cfg.mode,
         "color_freq": cfg.color_freq,
         "N": cfg.glyphs,
+        "target_fps": cfg.target_fps,
         "frames": nframes,
         "fps_sustained": round(fps, 2),
         "bytes_per_frame": round(bpf, 1),
@@ -285,7 +287,7 @@ def env_meta() -> dict:
 # --- CSV emission --------------------------------------------------------------
 CSV_COLUMNS = [
     "timestamp", "host", "emulator", "term", "colorterm", "net", "geom",
-    "viewport", "mode", "color_freq", "N", "frames",
+    "viewport", "mode", "color_freq", "N", "target_fps", "frames",
     "fps_sustained", "bytes_per_frame", "frame_ms_p50", "frame_ms_p95",
 ]
 
@@ -305,8 +307,8 @@ def csv_row(result: dict) -> str:
         e["timestamp"], e["host"], e["emulator"], e["term"], e["colorterm"],
         e["net"], e["geom"],
         result["viewport"], result["mode"], result["color_freq"], result["N"],
-        result["frames"], result["fps_sustained"], result["bytes_per_frame"],
-        result["frame_ms_p50"], result["frame_ms_p95"],
+        result["target_fps"], result["frames"], result["fps_sustained"],
+        result["bytes_per_frame"], result["frame_ms_p50"], result["frame_ms_p95"],
     ]
     return ",".join(_csv_field(v) for v in values)
 
@@ -359,7 +361,10 @@ def measure(term, cfg: BenchConfig) -> dict:
             counts = cfg.mode == "full" or not bootstrap_full
             if counts and time.monotonic() >= warmup_until:
                 frame_ms.append(dt * 1000.0)
-                frame_bytes.append(len(frame.encode("utf-8")))
+                # Frames are ASCII-only (ANSI escapes + digits + ASCII glyphs),
+                # so len(frame) equals the UTF-8 byte length; skipping the
+                # per-frame encode() keeps the measurement loop lean.
+                frame_bytes.append(len(frame))
     return summarize(frame_ms, frame_bytes, cfg)
 
 
@@ -373,8 +378,12 @@ def selftest() -> int:
     g.advance(cfg, rng)
     c1 = compose_cells(cfg, g)
     assert len(changed_cells(c0, c1)) > 0, "motion must change cells"
-    assert len(render_full(c1).encode()) > 0, "full frame must produce bytes"
-    render_diff(c0, c1)                  # must run without error
+    full = render_full(c1)
+    assert len(full) > 0, "full frame must produce bytes"
+    # ASCII-only is a measurement invariant: it lets bytes_per_frame use
+    # len(frame) instead of an encode() (see measure()/_mean_bytes).
+    assert full.isascii(), "full frame must be ASCII-only"
+    assert render_diff(c0, c1).isascii(), "diff frame must be ASCII-only"
     return 0
 
 
@@ -392,7 +401,7 @@ def _mean_bytes(glyphs: int, mode: str, color_freq: float,
         g.advance(cfg, rng)
         cur = compose_cells(cfg, g)
         frame = render_full(cur) if mode == "full" else render_diff(prev, cur)
-        total += len(frame.encode("utf-8"))
+        total += len(frame)                  # ASCII-only frame: chars == bytes
         prev = cur
     return total // frames
 
@@ -434,6 +443,7 @@ def build_config(args: argparse.Namespace) -> BenchConfig:
     return BenchConfig(
         glyphs=args.glyphs, mode=args.mode, color_freq=args.color_freq,
         vw=vw, vh=vh, duration=args.duration, seed=args.seed,
+        target_fps=args.target_fps,
     )
 
 
@@ -484,6 +494,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     cfg = build_config(args)
+    if cfg.vw > term.width or cfg.vh > term.height:
+        sys.stderr.write(
+            f"render_spike: viewport {cfg.vw}x{cfg.vh} exceeds the terminal "
+            f"{term.width}x{term.height}; terminals wrap/scroll past their "
+            f"bounds, which voids the byte and timing measurement. Resize the "
+            f"terminal or reduce --viewport.\n"
+        )
+        return 2
     result = measure(term, cfg)
     emit_csv(result, args.out)
     return 0
