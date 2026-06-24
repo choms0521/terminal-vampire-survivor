@@ -158,11 +158,16 @@ def _i(data: dict, key: str, defaults: dict) -> int:
 
 
 def _require_positive(name: str, value: float) -> None:
-    """Raise a clear ValueError if a rate/size value is not strictly positive."""
+    """Raise a clear ValueError if a rate/size value is not strictly positive.
+
+    The hint points at the right file by the key's shape: balance keys are dotted
+    and sectioned (e.g. ``weapon.cooldown``) while operating-point keys are flat
+    (e.g. ``sim_tps``), so the message names the file the bad value came from.
+    """
     if value <= 0:
+        source = "config/balance.toml" if "." in name else "config/tuning.toml"
         raise ValueError(
-            f"config: {name} must be > 0, got {value!r} "
-            f"(check config/tuning.toml)"
+            f"config: {name} must be > 0, got {value!r} (check {source})"
         )
 
 
@@ -230,6 +235,11 @@ def load_config(tuning_path: str | Path, balance_path: str | Path) -> Config:
     entity_cap = _i(tuning, "entity_cap", _TUNING_DEFAULTS)
     aspect_x = _f(tuning, "aspect_x", _TUNING_DEFAULTS)
     render_mode = str(tuning.get("render_mode", _TUNING_DEFAULTS["render_mode"]))
+    if render_mode not in ("full", "diff"):
+        raise ValueError(
+            f"config: render_mode must be 'full' or 'diff', got {render_mode!r} "
+            f"(check config/tuning.toml)"
+        )
 
     # Range validation: rates and sizes must be strictly positive.
     _require_positive("sim_tps", sim_tps)

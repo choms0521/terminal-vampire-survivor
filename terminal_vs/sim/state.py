@@ -217,8 +217,9 @@ def new_run(cfg: Config, rng: random.Random) -> SimState:
 
     ``rng`` is accepted for signature symmetry with step/maybe_spawn (and future
     randomized starts); the Phase 1 start is deterministic. The player spawns at
-    the world origin with full hp from the balance table, and the camera centers
-    on it.
+    the world origin with full hp from the ``_PLAYER_START_HP`` module constant
+    (player hp/speed are not yet in the balance table; externalizing them is a
+    Phase 3 balancing concern), and the camera centers on it.
     """
     state = SimState(cfg)
     player = Player(

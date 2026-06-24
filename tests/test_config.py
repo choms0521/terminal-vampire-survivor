@@ -164,15 +164,30 @@ def test_out_of_range_value_raises_valueerror(tmp_path, bad_line):
     tuning = _write(tmp_path / "tuning.toml", "\n".join(lines) + "\n")
     balance = _write(tmp_path / "balance.toml", VALID_BALANCE)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as exc:
         load_config(tuning, balance)
+    # The hint points at the operating-point file for a tuning value.
+    assert "config/tuning.toml" in str(exc.value)
 
 
 def test_out_of_range_balance_raises_valueerror(tmp_path):
-    """A non-positive balance value raises a clear ValueError."""
+    """A non-positive balance value raises a clear ValueError naming balance.toml."""
     tuning = _write(tmp_path / "tuning.toml", VALID_TUNING)
     bad_balance = VALID_BALANCE.replace("hp           = 25.0", "hp           = 0")
     balance = _write(tmp_path / "balance.toml", bad_balance)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as exc:
         load_config(tuning, balance)
+    # The hint must name the balance file (not tuning) for a balance value.
+    assert "config/balance.toml" in str(exc.value)
+
+
+def test_invalid_render_mode_raises_valueerror(tmp_path):
+    """A render_mode outside {'full','diff'} raises a clear ValueError."""
+    bad_tuning = VALID_TUNING.replace('render_mode  = "full"', 'render_mode  = "fancy"')
+    tuning = _write(tmp_path / "tuning.toml", bad_tuning)
+    balance = _write(tmp_path / "balance.toml", VALID_BALANCE)
+
+    with pytest.raises(ValueError) as exc:
+        load_config(tuning, balance)
+    assert "render_mode" in str(exc.value)
