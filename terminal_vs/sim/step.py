@@ -50,6 +50,13 @@ _PLAYER_KNOCKBACK_FORCE = 1.5
 _ENEMY_CONTACT_DAMAGE = 5.0
 # Xp value of a gem dropped on enemy death.
 _XP_GEM_VALUE = 1.0
+# Player base move speed as a multiple of the enemy move speed. Strictly > 1 so
+# the player can out-run enemies and kite -- the core survival mechanic that
+# keeps the vertical slice playable (with equal speed, enemies always catch the
+# player and the contact damage is unavoidable). A Phase 1 playability constant;
+# externalizing player speed/hp into balance.toml and tuning the exact value is
+# deferred to the Phase 3 balancing pass.
+_PLAYER_SPEED_MULT = 1.5
 # Spatial-hash bucket size (world units) used for collision queries.
 _COLLISION_CELL_SIZE = 2.0
 # Despawn distance: enemies/pickups farther than this many viewport-half-widths
@@ -89,12 +96,14 @@ def _apply_input(state: SimState, intent: Intent, cfg: Config, dt: float) -> Non
     """Set the player's velocity from the 8-direction intent and integrate it.
 
     The intent vector is normalized so diagonal movement is not faster than
-    orthogonal movement, then scaled by the enemy move speed as the player base
-    speed (Phase 1 reuses a balance value rather than adding a player-speed key).
+    orthogonal movement, then scaled by the player's base move speed. Phase 1
+    derives that from the enemy move speed times ``_PLAYER_SPEED_MULT`` (> 1) so
+    the player out-runs enemies and can kite -- the core survival loop. Tuning
+    and externalizing this value is deferred to the Phase 3 balancing pass.
     """
     dx = float(intent.dx)
     dy = float(intent.dy)
-    speed = cfg.balance.enemy.move_speed
+    speed = cfg.balance.enemy.move_speed * _PLAYER_SPEED_MULT
     mag = hypot(dx, dy)
     if mag == 0.0:
         state.player.vx = 0.0

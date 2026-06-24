@@ -103,14 +103,19 @@ def _drain_levelups(state, cfg: Config, rng: random.Random) -> None:
     state.level_up_pending = False
 
 
-def run(term, cfg: Config, rng: random.Random) -> None:
+def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
     """Run the fixed-timestep game loop until a quit key or the player dies.
 
     The simulation advances in fixed ``sim_dt`` sub-steps consumed from a time
     accumulator (master appendix A); rendering happens once per frame. ``term`` is
     only polled/drawn here and never handed to the sim or rules layers.
+
+    ``sim`` is a test seam: production calls pass nothing and a fresh ``new_run``
+    is created; tests may inject a primed ``SimState`` (e.g. with a pending
+    level-up) to exercise a specific mode transition deterministically.
     """
-    sim = new_run(cfg, rng)
+    if sim is None:
+        sim = new_run(cfg, rng)
     # Capture the player's full hp as the HUD's HP-bar denominator BEFORE any
     # step mutates it -- there is no max_hp field in the contract, so this avoids
     # both a hardcoded 100 and importing a private start constant.
