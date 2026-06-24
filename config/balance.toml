@@ -1,31 +1,129 @@
-# config/balance.toml - game-balance constants (Phase 1 vertical slice).
+# config/balance.toml - game-balance constants (Phase 2 content set).
 #
-# These are tunable game-design values: weapon, enemy, xp curve, and pickup
-# constants. Unlike config/tuning.toml (performance operating point), these are
-# balance dials that can be edited without code changes (master plan section 5.5).
+# These are tunable game-design values: weapons, passives, enemies, evolution,
+# the director difficulty curve, leveling, and pickup constants. Unlike
+# config/tuning.toml (performance operating point), these are balance dials that
+# can be edited without code changes (master plan section 5.5).
 #
 # config.py loads this file and falls back to code defaults for any missing key,
-# so the game still runs if a section or key is absent. Starting values below are
-# initial Phase 1 estimates and will be balanced in later phases.
+# so the game still runs if a section or key is absent. Out-of-range values
+# (e.g. a negative cooldown) raise a clear ValueError naming the offending key.
+#
+# Performance operating-point constants live in tuning.toml, not here.
+#
+# Starting values below are initial Phase 2 estimates and will be balanced in a
+# later phase; Phase 2 only proves that builds diverge and evolution triggers.
 
-# Weapon: the single Phase 1 weapon (dagger) - auto-fires at the nearest enemy.
-[weapon]
-cooldown         = 0.6    # seconds between auto-fire shots
-damage           = 10.0   # damage per projectile hit
-projectile_speed = 18.0   # world units per second
-projectile_ttl   = 1.2    # projectile lifetime in seconds
+# Leveling: N-pick draft size and the xp curve. xp to clear level L is
+# xp_curve_base * xp_curve_growth ** (L - 1).
+[leveling]
+draft_choices   = 3      # number of cards shown per level-up draft
+xp_curve_base   = 5.0    # xp needed to clear level 1
+xp_curve_growth = 1.5    # geometric multiplier per level
 
-# Enemy: the single Phase 1 enemy type - chases the player.
-[enemy]
-hp           = 20.0  # starting hit points
-move_speed   = 4.0   # world units per second toward the player
-spawn_weight = 1.0   # relative spawn weight (flat ratio in Phase 1)
+# Weapons. Each weapon has a level (max_level), an auto-fire cooldown (seconds,
+# multiplied by the attack-speed passive), per-shot damage, a projectile count,
+# projectile travel speed/lifetime, and a targeting strategy.
+#
+# targeting strategies:
+#   "nearest"           - aim at the nearest enemy (tie-break: lowest id)
+#   "nearest_or_random" - aim at the nearest enemy; ties resolved via injected RNG
+#   "forward_arc"       - instant hit on enemies inside a forward arc (no projectile)
 
-# Experience curve: xp to clear level L is base * growth ** (L - 1).
-[xp]
-base   = 5.0  # xp needed to clear level 1
-growth = 1.5  # geometric multiplier per level
+[weapons.dagger]
+max_level        = 8
+cooldown         = 1.2
+damage           = 6.0
+projectile_count = 1
+projectile_speed = 14.0
+projectile_ttl   = 1.2
+targeting        = "nearest"
 
-# Pickup: xp-gem auto-collect behavior.
+[weapons.magic_bolt]
+max_level        = 8
+cooldown         = 1.8
+damage           = 9.0
+projectile_count = 1
+projectile_speed = 10.0
+projectile_ttl   = 1.6
+targeting        = "nearest_or_random"
+
+[weapons.swing]
+max_level        = 8
+cooldown         = 1.0
+damage           = 8.0
+projectile_count = 0      # melee: no projectile, resolved as instant hits
+projectile_speed = 0.0
+projectile_ttl   = 0.0
+targeting        = "forward_arc"
+arc_range        = 5.0    # world-unit reach of the swing in front of the player
+arc_half_width   = 0.3    # cosine half-width: 0 = 180 deg (hemisphere), 1 = 0 deg (ray only), 0.3 ~= 72 deg cone
+
+# Evolution result weapon. Replaces dagger when the evolution applies. max_level
+# is 1 (evolved weapons are terminal in Phase 2). It pierces multiple enemies.
+[weapons.dagger_evolved]
+max_level        = 1
+cooldown         = 0.6
+damage           = 10.0
+projectile_count = 3
+projectile_speed = 18.0
+projectile_ttl   = 1.2
+targeting        = "nearest"
+pierce           = 4
+
+# Passives. Each multiplies a single stat per owned level (product over levels).
+#   attack_speed -> cooldown multiplier (< 1 makes weapons fire faster)
+#   move_speed   -> movement multiplier (> 1 makes the player faster)
+#   magnet       -> pickup-range multiplier (> 1 widens the magnet radius)
+[passives.attack_speed]
+max_level            = 5
+multiplier_per_level = 0.92
+
+[passives.move_speed]
+max_level            = 5
+multiplier_per_level = 1.08
+
+[passives.magnet]
+max_level            = 5
+multiplier_per_level = 1.25
+
+# Enemies. hp / move_speed / spawn_weight drive the director's weighted spawn.
+# glyph and color are render hints consumed by sim/render (Chunk 2).
+[enemies.walker]              # slow basic chaser (many)
+hp           = 10.0
+move_speed   = 2.5
+spawn_weight = 70.0
+glyph        = "z"
+color        = "red"
+
+[enemies.swarm]               # fast weak swarm
+hp           = 4.0
+move_speed   = 5.0
+spawn_weight = 30.0
+glyph        = "x"
+color        = "magenta"
+
+# Evolution rule: dagger at base_max_level + the attack_speed passive owned ->
+# the dagger_evolved weapon. Adding evolutions is data-only (no code changes).
+[evolution.dagger_x]
+base             = "dagger"
+requires_passive = "attack_speed"
+base_max_level   = 8
+result_weapon    = "dagger_evolved"
+
+# Director difficulty curve. Spawn interval shrinks (spawn rate rises) over time;
+# reinforce_steps is a per-minute table of [minute, interval_mult, concurrent].
+[director]
+base_spawn_interval = 2.0
+min_spawn_interval  = 0.4
+reinforce_steps = [
+  [0, 1.0, 1],
+  [1, 0.8, 2],
+  [2, 0.6, 3],
+  [3, 0.5, 4],
+]
+
+# Pickup: base magnet (xp-gem auto-collect) radius in world units. The magnet
+# passive multiplies this base radius.
 [pickup]
-magnet_range = 4.0  # auto-collect radius in world units
+magnet_range = 4.0

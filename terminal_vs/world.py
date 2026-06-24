@@ -109,18 +109,32 @@ def is_visible(wx: float, wy: float, cam: Camera, cfg: Config) -> bool:
     return 0 <= col < cfg.viewport_w and 0 <= row < cfg.viewport_h
 
 
+def sq_dist_aspect_x(
+    ax: float, ay: float, bx: float, by: float, aspect_x: float
+) -> float:
+    """Aspect-corrected squared distance, parameterized by the scalar aspect_x.
+
+    This holds the actual aspect-distance math: the X delta is scaled by
+    ``aspect_x`` with the SAME transform as :func:`world_to_cell`, so targeting
+    distance and rendered distance agree (a circle of equal screen radius reads
+    as a circle). Returns the squared distance to avoid a sqrt -- callers
+    comparing distances do not need it.
+
+    The scalar form exists so the rules layer (rules/weapons.py targeting) can
+    measure on-screen distance with only ``aspect_x`` from the operating point,
+    without importing the whole :class:`Config`. :func:`sq_dist_aspect` is the
+    Config-taking convenience wrapper used elsewhere.
+    """
+    dx = (ax - bx) * aspect_x
+    dy = (ay - by)
+    return dx * dx + dy * dy
+
+
 def sq_dist_aspect(ax: float, ay: float, bx: float, by: float, cfg: Config) -> float:
     """Aspect-corrected squared distance between two world points.
 
-    Single source of truth for "distance as it appears on screen": the X delta
-    is scaled by ``cfg.aspect_x`` with the SAME transform as
-    :func:`world_to_cell`, so targeting distance and rendered distance agree
-    (a circle of equal screen radius reads as a circle). Returns the squared
-    distance to avoid a sqrt -- callers comparing distances do not need it.
-
-    rules/weapons.py imports this for nearest-enemy target selection, so the
-    aspect convention has exactly one definition.
+    Single source of truth for "distance as it appears on screen": delegates to
+    :func:`sq_dist_aspect_x` with ``cfg.aspect_x``. Returns the squared distance
+    to avoid a sqrt -- callers comparing distances do not need it.
     """
-    dx = (ax - bx) * cfg.aspect_x
-    dy = (ay - by)
-    return dx * dx + dy * dy
+    return sq_dist_aspect_x(ax, ay, bx, by, cfg.aspect_x)
