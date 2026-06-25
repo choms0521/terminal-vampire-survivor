@@ -26,7 +26,7 @@ blessed, no global state, no Chinese characters.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import cos, hypot, radians, sin
+from math import acos, cos, hypot, radians, sin
 from random import Random
 
 from ..world import sq_dist_aspect_x
@@ -71,6 +71,23 @@ class InstantHitSpec:
 
 
 @dataclass(frozen=True)
+class EffectSpec:
+    """Frozen visual-only effect marker (the pure result of a fire).
+
+    Absolute world position + glyph/color + ttl. The sim builds a mutable
+    ``Effect`` entity from it; the value itself is immutable and crosses the
+    rules/sim boundary read-only. Purely cosmetic -- no damage, no id, no
+    collision (e.g. the melee swing arc that makes a forward_arc hit visible).
+    """
+
+    x: float
+    y: float
+    glyph: str
+    color: str
+    ttl: float
+
+
+@dataclass(frozen=True)
 class FireContext:
     """Read-only snapshot a weapon needs to decide a fire (master 5.4 stage 4).
 
@@ -105,6 +122,7 @@ class WeaponFireResult:
     new_cooldown: float
     projectiles: tuple[ProjectileSpec, ...] = ()
     instant_hits: tuple[InstantHitSpec, ...] = ()
+    effects: tuple[EffectSpec, ...] = ()
 
 
 def _select_target(ctx: FireContext, rng: Random) -> tuple[int, float, float] | None:
@@ -235,6 +253,46 @@ def _make_forward_arc_hits(ctx: FireContext) -> tuple[InstantHitSpec, ...]:
     return tuple(hits)
 
 
+def _make_swing_effects(ctx: FireContext) -> tuple[EffectSpec, ...]:
+    """Build the visual swing arc for a forward_arc (melee) fire.
+
+    A melee swing deals instant damage with no projectile, so without this it is
+    invisible. Place the weapon's glyph at ``arc_range`` in RAW world space (the
+    same space the hit test uses) at angles spanning the cone -- the cone
+    half-angle is ``acos(arc_half_width)`` (the same cosine threshold
+    :func:`_make_forward_arc_hits` compares against) -- so the drawn arc honestly
+    marks where the swing reaches. The glyphs are cosmetic; the sim gives them a
+    short ttl and draws them under the player. Defaults to facing +X when the
+    player has not moved yet, so the arc is always well-defined.
+    """
+    weapon = ctx.weapon_def
+    px, py = ctx.player_pos
+    fx, fy = ctx.player_facing
+    facing_len = hypot(fx, fy)
+    if facing_len == 0.0:
+        fx, fy, facing_len = 1.0, 0.0, 1.0
+    ux, uy = fx / facing_len, fy / facing_len
+    # Cone half-angle from the cosine half-width (clamped for safety against fp
+    # drift pushing the argument just outside [-1, 1]).
+    half = acos(max(-1.0, min(1.0, weapon.arc_half_width)))
+    specs: list[EffectSpec] = []
+    for angle in (-half, 0.0, half):
+        c = cos(angle)
+        s = sin(angle)
+        rx = ux * c - uy * s
+        ry = ux * s + uy * c
+        specs.append(
+            EffectSpec(
+                x=px + rx * weapon.arc_range,
+                y=py + ry * weapon.arc_range,
+                glyph=weapon.glyph,
+                color=weapon.color,
+                ttl=weapon.effect_ttl,
+            )
+        )
+    return tuple(specs)
+
+
 def tick_weapon(
     cooldown_remaining: float, ctx: FireContext, rng: Random
 ) -> WeaponFireResult:
@@ -268,7 +326,10 @@ def tick_weapon(
         if not hits:
             return WeaponFireResult(fired=False, new_cooldown=_READY_IDLE_COOLDOWN)
         return WeaponFireResult(
-            fired=True, new_cooldown=reset, instant_hits=hits
+            fired=True,
+            new_cooldown=reset,
+            instant_hits=hits,
+            effects=_make_swing_effects(ctx),
         )
 
     target = _select_target(ctx, rng)

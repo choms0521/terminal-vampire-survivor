@@ -73,13 +73,15 @@ def compose_cells(state, cam: Camera, cfg: Config) -> list[list[tuple[str, str]]
             grid[row][col] = (entity.glyph, entity.color)
 
     # Draw priority (each layer overwrites the previous at a shared cell):
-    # pickups < enemies < projectiles, then the player on top of all entities.
+    # pickups < enemies < projectiles < effects, then the player on top of all.
     for pickup in state.pickups:
         _place(pickup)
     for enemy in state.enemies:
         _place(enemy)
     for projectile in state.projectiles:
         _place(projectile)
+    for effect in state.effects:
+        _place(effect)
     _place(state.player)  # always-on-top (master 3.4)
 
     return grid

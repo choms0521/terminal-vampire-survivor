@@ -216,6 +216,31 @@ class Pickup:
         self.color: str = color
 
 
+class Effect:
+    """Mutable visual-only effect marker (e.g. a melee swing arc glyph).
+
+    Purely cosmetic: it carries a render glyph/color and a ``ttl`` that counts
+    down each tick, with NO damage, NO collision, and NO id (it has no identity
+    and never interacts, so it does not consume ``next_id``). The render layer
+    draws it like any entity (duck-typed ``x`` / ``y`` / ``glyph`` / ``color``);
+    step decrements ``ttl`` and cleanup drops it once it expires.
+    """
+
+    def __init__(
+        self,
+        x: float,
+        y: float,
+        glyph: str = "*",
+        color: str = "white",
+        ttl: float = 0.0,
+    ) -> None:
+        self.x: float = x
+        self.y: float = y
+        self.glyph: str = glyph
+        self.color: str = color
+        self.ttl: float = ttl
+
+
 class SimState:
     """Mutable simulation state -- the section 6 boundary's mutable side.
 
@@ -252,6 +277,7 @@ class SimState:
         self.player: Player
         self.enemies: list[Enemy] = []
         self.projectiles: list[Projectile] = []
+        self.effects: list[Effect] = []
         self.pickups: list[Pickup] = []
         self.camera: Camera = Camera(0.0, 0.0)
         self.build: BuildState = BuildState()

@@ -263,3 +263,28 @@ def test_zero_spread_stacks_multishot_backward_compatible():
     assert len(specs) == 3
     # Zero spread -> every dart identical (stacked on the aim line).
     assert all((s.vx, s.vy) == (specs[0].vx, specs[0].vy) for s in specs)
+
+
+def test_swing_fire_returns_visual_effects_in_front():
+    """A forward_arc (swing) fire returns visual effect markers in front of the
+    player so the melee swing is visible (it deals instant damage with no
+    projectile). The markers carry the weapon's glyph/color and a positive ttl."""
+    # Facing +X with an enemy in the arc so the swing fires.
+    ctx = _ctx(weapon="swing", enemies=((0, 3.0, 0.0),), facing=(1.0, 0.0), dt=1.0)
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    assert result.fired is True
+    assert result.effects != ()  # the swing arc is drawn
+    for e in result.effects:
+        assert e.x > 0.0          # placed forward of the player (+X facing)
+        assert e.glyph == ")"     # the swing weapon's glyph
+        assert e.color == "red"   # the swing weapon's color
+        assert e.ttl > 0.0        # lives long enough to be rendered
+
+
+def test_projectile_weapons_return_no_visual_effects():
+    """nearest / nearest_or_random weapons carry their visual in the projectile
+    itself, so they return no separate effect markers."""
+    ctx = _ctx(weapon="dagger", enemies=((0, 3.0, 0.0),), dt=1.0)
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    assert result.fired is True
+    assert result.effects == ()

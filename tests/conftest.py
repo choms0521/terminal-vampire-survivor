@@ -86,6 +86,7 @@ def make_defs(
                 arc_half_width=0.3,
                 glyph=")",
                 color="red",
+                effect_ttl=0.15,
             ),
             "dagger_evolved": WeaponDef(
                 name="dagger_evolved",

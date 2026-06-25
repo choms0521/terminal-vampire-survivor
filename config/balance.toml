@@ -66,6 +66,7 @@ arc_range        = 5.0    # world-unit reach of the swing in front of the player
 arc_half_width   = 0.3    # cosine half-width: 0 = 180 deg (hemisphere), 1 = 0 deg (ray only), 0.3 ~= 72 deg cone
 glyph            = ")"        # melee swing arc (drawn by the swing effect, stage 3)
 color            = "red"
+effect_ttl       = 0.15       # swing-visual lifetime in seconds (a few ticks)
 
 # Evolution result weapon. Replaces dagger when the evolution applies. max_level
 # is 1 (evolved weapons are terminal in Phase 2). It pierces multiple enemies.

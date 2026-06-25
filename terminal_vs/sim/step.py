@@ -40,6 +40,7 @@ from ..rules.defs import BalanceDefs
 from .spatial import SpatialHash
 from .spawn import maybe_spawn
 from .state import (
+    Effect,
     Enemy,
     Intent,
     Pickup,
@@ -97,6 +98,7 @@ def step(state: SimState, intent: Intent, cfg: Config, rng: random.Random) -> No
     _move_enemies_toward_player(state, cfg, dt)     # 3) enemy AI: chase at each kind's move speed
     _fire_weapons(state, cfg, dt, rng)              # 4) weapon: tick every owned weapon (projectiles + instant hits)
     _advance_projectiles(state, dt)                 # 5) projectiles: move + ttl
+    _advance_effects(state, dt)                     # 5b) visual effects: ttl countdown (no move, no collision)
     _resolve_collisions(state, cfg)                 # 6) collisions: pierce-aware proj<->enemy, enemy<->player+knockback
     _drop_xp_on_death(state, rng)                   # 7) death->xp drop: fixed gem
     _collect_pickups(state, cfg)                    # 8) pickup->xp->level flag: magnet-passive-scaled
@@ -250,6 +252,13 @@ def _fire_weapons(
             target = _enemy_by_id(state, hit.target_id)
             if target is not None:
                 target.hp = rules_damage.apply_hit(target.hp, hit.damage)
+        for eff in result.effects:
+            # Cosmetic only: no id, no collision -- ttl counts down in stage 5b.
+            state.effects.append(
+                Effect(
+                    x=eff.x, y=eff.y, glyph=eff.glyph, color=eff.color, ttl=eff.ttl
+                )
+            )
 
 
 # --- Stage 5: projectile move + ttl ------------------------------------------
@@ -259,6 +268,17 @@ def _advance_projectiles(state: SimState, dt: float) -> None:
         proj.x += proj.vx * dt
         proj.y += proj.vy * dt
         proj.ttl -= dt
+
+
+# --- Stage 5b: visual effect ttl ---------------------------------------------
+def _advance_effects(state: SimState, dt: float) -> None:
+    """Count down each visual effect's ttl in place (effects do not move).
+
+    Effects are cosmetic markers (e.g. the swing arc); they never move or
+    collide, so this only ages them. Cleanup (stage 9) drops expired ones.
+    """
+    for eff in state.effects:
+        eff.ttl -= dt
 
 
 # --- Stage 6: collision resolve ----------------------------------------------
@@ -405,6 +425,7 @@ def _cleanup_dead_and_far(state: SimState, cfg: Config) -> None:
         if not rules_damage.is_dead(e.hp) and not _far(e)
     ]
     state.projectiles = [p for p in state.projectiles if p.ttl > 0.0]
+    state.effects = [e for e in state.effects if e.ttl > 0.0]
     state.pickups = [p for p in state.pickups if not _far(p)]
 
 

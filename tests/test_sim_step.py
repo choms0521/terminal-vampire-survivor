@@ -229,3 +229,44 @@ def test_weapon_def_glyph_color_default_to_prior_look():
     )
     assert w.glyph == "*"
     assert w.color == "yellow"
+
+
+def test_swing_fire_spawns_visual_effect_entities():
+    """A swing (forward_arc) fire appends cosmetic Effect entities so the melee
+    swing is visible; they carry the swing glyph and a ttl exceeding one tick."""
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    state.build = replace(state.build, weapon_levels=(("swing", 1),))
+    state.weapon_cooldowns = {"swing": 0.0}
+    state.player.facing_x, state.player.facing_y = 1.0, 0.0
+    state.enemies.append(
+        Enemy(state.alloc_id(), state.player.x + 3.0, state.player.y, hp=100.0)
+    )
+
+    dt = 1.0 / cfg.sim_tps
+    _fire_weapons(state, cfg, dt, random.Random(0))
+
+    assert len(state.effects) > 0  # the swing drew its arc
+    assert all(e.glyph == ")" for e in state.effects)  # the swing weapon's glyph
+    assert all(e.ttl > dt for e in state.effects)  # survives to the next render
+
+
+def test_swing_effects_expire_and_are_cleaned_up():
+    """Swing effect entities age each tick and cleanup removes them once expired,
+    so they do not accumulate (no leak)."""
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    state.build = replace(state.build, weapon_levels=(("swing", 1),))
+    state.weapon_cooldowns = {"swing": 0.0}
+    state.player.facing_x, state.player.facing_y = 1.0, 0.0
+    state.enemies.append(
+        Enemy(state.alloc_id(), state.player.x + 3.0, state.player.y, hp=1_000_000.0)
+    )
+
+    # First step fires the swing and spawns its effects.
+    step(state, Intent(0, 0), cfg, random.Random(0))
+    assert len(state.effects) > 0
+    # ttl 0.15s at dt 0.05s -> ~3 ticks; swing cooldown 1.0s -> no refire soon.
+    for _ in range(5):
+        step(state, Intent(0, 0), cfg, random.Random(0))
+    assert state.effects == []  # all expired and cleaned up

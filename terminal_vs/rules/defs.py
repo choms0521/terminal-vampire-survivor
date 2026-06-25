@@ -65,6 +65,7 @@ class WeaponDef:
     glyph: str = "*"         # render glyph for this weapon's projectile / effect
     color: str = "yellow"    # render color for this weapon's projectile / effect
     spread_angle: float = 0.0  # total fan angle (deg) across multi-shot; 0 = stacked
+    effect_ttl: float = 0.0    # forward_arc swing-visual lifetime (sec); 0 = no effect
 
 
 @dataclass(frozen=True)
@@ -229,6 +230,7 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
             glyph=str(w.get("glyph", "*")),
             color=str(w.get("color", "yellow")),
             spread_angle=float(w.get("spread_angle", 0.0)),
+            effect_ttl=float(w.get("effect_ttl", 0.0)),
         )
         for name, w in weapons_raw.items()
     }
