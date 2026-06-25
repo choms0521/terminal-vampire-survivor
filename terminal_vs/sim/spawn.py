@@ -154,6 +154,12 @@ def spawn_enemies(
     """
     if not params.enemy_weights:
         return
+    # Non-positive total weight: nothing to draw from. config validates each
+    # spawn_weight > 0, but a directly-built BalanceDefs (e.g. a test) could carry
+    # zero/negative weights, so guard here to match the documented behavior rather
+    # than let the weighted pick run on a zero-total table.
+    if sum(weight for _, weight in params.enemy_weights) <= 0:
+        return
 
     bounds = visible_bounds(state.camera, cfg)
     # Ring radius: half the larger visible extent plus a margin, so the spawn

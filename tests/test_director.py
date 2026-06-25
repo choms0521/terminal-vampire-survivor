@@ -13,7 +13,12 @@ import copy
 import random
 
 from terminal_vs.rules.defs import DirectorDef, ReinforceStep
-from terminal_vs.sim.spawn import director_params, maybe_spawn, spawn_enemies
+from terminal_vs.sim.spawn import (
+    SpawnParams,
+    director_params,
+    maybe_spawn,
+    spawn_enemies,
+)
 from terminal_vs.sim.state import new_run
 
 from .conftest import make_config, make_defs
@@ -95,6 +100,24 @@ def test_spawn_enemies_respects_cap():
     total = 1 + len(state.enemies) + len(state.projectiles) + len(state.pickups)
     assert total <= cfg.entity_cap
     assert len(state.enemies) == cfg.entity_cap - 1  # filled exactly to the cap
+
+
+def test_spawn_enemies_skips_on_non_positive_total_weight():
+    """spawn_enemies adds nothing when the total spawn weight is non-positive.
+
+    config validates each spawn_weight > 0, but a directly-built SpawnParams (which
+    bypasses that validation) with all-zero weights must spawn no enemy rather than
+    run the weighted pick on a zero-total table -- the documented behavior.
+    """
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    params = SpawnParams(
+        spawn_interval=2.0,
+        concurrent=5,
+        enemy_weights=(("walker", 0.0), ("swarm", 0.0)),
+    )
+    spawn_enemies(state, params, cfg, random.Random(0))
+    assert len(state.enemies) == 0
 
 
 def test_maybe_spawn_accumulates_and_spawns():

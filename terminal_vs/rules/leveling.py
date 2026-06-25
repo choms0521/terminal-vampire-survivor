@@ -15,11 +15,12 @@ State-machine contract (consumed by Chunk 2's loop):
 
   * ``accrue_xp`` ONLY accumulates xp; it never bumps the level.
   * ``level_up_pending`` is True while accumulated xp meets/exceeds the current
-    level's threshold. One ``apply_choice`` consumes exactly one pending level
-    (it bumps level and carries the xp overflow), so the loop re-checks
-    ``level_up_pending`` after each choice to drain banked levels.
+    level's threshold. The loop (``loop.apply_draft_selection``) owns consuming a
+    pending level -- it bumps ``level`` and carries the xp overflow -- then
+    re-checks ``level_up_pending`` after each choice to drain banked levels.
   * ``roll_choices`` produces the N-pick draft deterministically from the build +
-    injected rng; ``apply_choice`` applies the selected card to a new BuildState.
+    injected rng; ``apply_choice`` applies the selected card to a new BuildState
+    (weapon/passive bump or evolution) but does NOT advance ``level``/``xp``.
 """
 
 from __future__ import annotations
@@ -110,8 +111,10 @@ def accrue_xp(build: BuildState, gained: float) -> BuildState:
     """Return a NEW BuildState with ``gained`` xp added to the current level.
 
     Pure: ``build`` is never mutated (it is frozen). Only the xp accumulator
-    changes; level and threshold logic are handled by ``level_up_pending`` /
-    ``apply_choice``.
+    changes; ``level_up_pending`` tests the threshold and the loop
+    (``loop.apply_draft_selection``) owns advancing ``level`` and carrying the xp
+    overflow. ``apply_choice`` only applies the drafted card -- it does not consume
+    a pending level.
     """
     return replace(build, xp=build.xp + gained)
 
