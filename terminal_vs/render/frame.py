@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from ..config import Config
 from ..world import Camera, is_visible, world_to_cell
-from .hud import draft_overlay_lines, hud_lines
+from .hud import draft_overlay_lines, hud_lines, overlay_lines
 
 # Empty floor cell. A single space both reads as "no entity here" and, once rows
 # are padded to the fixed width, erases any ghost glyph left from a prior frame.
@@ -91,10 +91,11 @@ def compose_frame(
     cfg: Config,
     colorize,
     max_hp: float | None = None,
+    mode: str = "play",
 ) -> str:
-    """Compose the full frame string from the pure cell grid + HUD overlay.
+    """Compose the full frame string from the pure cell grid + HUD + modal overlay.
 
-    ``colorize(glyph, color_name) -> str`` is injected so this stays blessed-free
+    ``colorize(glyph, color_name) -> str`` is injected so this stays render-free
     and unit-testable: the headless test passes an identity colorizer, the
     emitter passes a blessed-backed one. Each row is padded to exactly
     ``cfg.viewport_w`` cells (fixed width erases ghosts, master 3.6); the HUD
@@ -103,10 +104,12 @@ def compose_frame(
     ``max_hp`` is threaded into the HUD as the HP-bar denominator (captured by the
     loop from the fresh run) so no player-start constant is hardcoded here.
 
-    Level-up draft overlay (master 3.4, 8): when ``state.pending_choices`` is
-    non-empty (the loop has rolled a draft and paused the sim), the numbered cards
-    are drawn centered over the frame so the player can see what to choose. The
-    draft draws over everything except the HUD rows.
+    Modal overlay (master 3.4, 8/9): ``mode`` selects the panel drawn centered
+    over the frame above the HUD rows -- the level-up draft (``levelup``), the
+    pause panel (``pause``), or the game-over summary (``gameover``); ``play``
+    draws none. For backward compatibility the draft also appears whenever
+    ``state.pending_choices`` is non-empty even if ``mode`` is left at ``play``
+    (callers that drive the draft purely via ``pending_choices``).
     """
     grid = compose_cells(state, cam, cfg)
 
@@ -124,34 +127,39 @@ def compose_frame(
                 "".join(colorize(glyph, color) for glyph, color in cells)
             )
 
-    # Draft overlay: drawn only while a level-up choice is pending (the sim is
-    # paused then, so this never competes with live gameplay). getattr keeps the
+    # Modal overlay: the mode's panel (pause/gameover) or the level-up draft,
+    # drawn centered over the frame above the HUD rows. The draft also shows
+    # whenever pending_choices is set even at mode="play" (backward compatible
+    # with callers that drive the draft via pending_choices). getattr keeps the
     # composer tolerant of test doubles without a pending_choices field.
-    draft = draft_overlay_lines(getattr(state, "pending_choices", ()))
-    if draft:
-        _overlay_draft_centered(rendered_rows, draft, cfg, hud_height=len(overlay))
+    panel = overlay_lines(mode, state)
+    if not panel and getattr(state, "pending_choices", ()):
+        panel = draft_overlay_lines(state.pending_choices)
+    if panel:
+        _overlay_panel_centered(rendered_rows, panel, cfg, hud_height=len(overlay))
 
     return "\n".join(rendered_rows)
 
 
-def _overlay_draft_centered(
+def _overlay_panel_centered(
     rendered_rows: list[str],
-    draft: list[str],
+    panel: list[str],
     cfg: Config,
     hud_height: int,
 ) -> None:
-    """Overlay the draft card lines centered on the frame, in place.
+    """Overlay a modal panel's lines centered on the frame, in place.
 
-    Vertically centered but never on top of the ``hud_height`` HUD rows, and
-    horizontally centered. Each line is plain text (no per-glyph color, like the
-    HUD) clipped and padded to the fixed viewport width so it cleanly overwrites
-    the paused gameplay beneath it. Lines that would fall outside the viewport are
-    skipped, so a tall draft never overflows the grid.
+    Serves every modal overlay (draft / pause / game-over). Vertically centered
+    but never on top of the ``hud_height`` HUD rows, and horizontally centered.
+    Each line is plain text (no per-glyph color, like the HUD) clipped and padded
+    to the fixed viewport width so it cleanly overwrites the gameplay beneath it.
+    Lines that would fall outside the viewport are skipped, so a tall panel never
+    overflows the grid.
     """
     width = cfg.viewport_w
     height = cfg.viewport_h
-    start = max(hud_height, (height - len(draft)) // 2)
-    for offset, line in enumerate(draft):
+    start = max(hud_height, (height - len(panel)) // 2)
+    for offset, line in enumerate(panel):
         row = start + offset
         if not (0 <= row < height):
             continue
@@ -185,15 +193,23 @@ def _term_colorize(term):
     return colorize
 
 
-def render_frame(term, state, cam: Camera, cfg: Config, max_hp: float | None = None) -> str:
+def render_frame(
+    term,
+    state,
+    cam: Camera,
+    cfg: Config,
+    max_hp: float | None = None,
+    mode: str = "play",
+) -> str:
     """Compose and emit one flicker-free frame; return the emitted frame string.
 
     Flicker-free (master 3.6): build the entire frame as one string, then emit it
     after a single ``term.home`` with NO clear. Returning the frame string lets a
     no-TTY smoke test assert the compose path produced a non-empty result without
-    needing a real terminal for the write.
+    needing a real terminal for the write. ``mode`` is threaded to the composer so
+    the pause / game-over / level-up overlay matches the loop's current mode.
     """
-    frame = compose_frame(state, cam, cfg, _term_colorize(term), max_hp)
+    frame = compose_frame(state, cam, cfg, _term_colorize(term), max_hp, mode)
     # Single home + one write, no clear (master 3.6): printing the cursor-home
     # escape then the frame overwrites the previous frame in place.
     print(term.home + frame, end="", flush=True)

@@ -184,7 +184,7 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
     intent = Intent(0, 0)
     # Paint the starting frame once so the player sees the initial state before
     # the first simulation step.
-    render_frame(term, sim, sim.camera, cfg, max_hp)
+    render_frame(term, sim, sim.camera, cfg, max_hp, mode)
 
     while True:
         key = term.inkey(timeout=cfg.poll_timeout)
@@ -197,7 +197,7 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
                 intent = new_intent
             elif str(key) == _PAUSE_KEY:
                 mode = _MODE_PAUSE
-                render_frame(term, sim, sim.camera, cfg, max_hp)
+                render_frame(term, sim, sim.camera, cfg, max_hp, mode)
                 continue
 
             now = monotonic()
@@ -227,7 +227,7 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
             # the full frame on every idle poll wastes IO and (observed) starves
             # the sim. A diff renderer is deferred to Phase 3.
             if steps > 0 or mode != _MODE_PLAY:
-                render_frame(term, sim, sim.camera, cfg, max_hp)
+                render_frame(term, sim, sim.camera, cfg, max_hp, mode)
 
         elif mode == _MODE_LEVELUP:
             # The frame was painted once when this mode was entered (the play
@@ -243,12 +243,12 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
                 apply_draft_selection(sim, index, cfg, rng)
                 if sim.level_up_pending:
                     # More levels banked: a fresh draft is showing.
-                    render_frame(term, sim, sim.camera, cfg, max_hp)
+                    render_frame(term, sim, sim.camera, cfg, max_hp, mode)
                 else:
                     mode = _MODE_PLAY
                     last = monotonic()
                     accumulator = 0.0
-                    render_frame(term, sim, sim.camera, cfg, max_hp)
+                    render_frame(term, sim, sim.camera, cfg, max_hp, mode)
 
         elif mode == _MODE_PAUSE:
             # Painted once on entry (the play branch renders before pausing);
