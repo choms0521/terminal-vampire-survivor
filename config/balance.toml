@@ -40,6 +40,8 @@ projectile_count = 1
 projectile_speed = 14.0
 projectile_ttl   = 1.2
 targeting        = "nearest"
+glyph            = "-"        # fast straight dart
+color            = "white"
 
 [weapons.magic_bolt]
 max_level        = 8
@@ -49,6 +51,8 @@ projectile_count = 1
 projectile_speed = 10.0
 projectile_ttl   = 1.6
 targeting        = "nearest_or_random"
+glyph            = "*"        # arcane bolt
+color            = "cyan"
 
 [weapons.swing]
 max_level        = 8
@@ -60,6 +64,8 @@ projectile_ttl   = 0.0
 targeting        = "forward_arc"
 arc_range        = 5.0    # world-unit reach of the swing in front of the player
 arc_half_width   = 0.3    # cosine half-width: 0 = 180 deg (hemisphere), 1 = 0 deg (ray only), 0.3 ~= 72 deg cone
+glyph            = ")"        # melee swing arc (drawn by the swing effect, stage 3)
+color            = "red"
 
 # Evolution result weapon. Replaces dagger when the evolution applies. max_level
 # is 1 (evolved weapons are terminal in Phase 2). It pierces multiple enemies.
@@ -72,6 +78,8 @@ projectile_speed = 18.0
 projectile_ttl   = 1.2
 targeting        = "nearest"
 pierce           = 4
+glyph            = ">"        # piercing evolved dart (fan of 3, stage 2)
+color            = "yellow"
 
 # Passives. Each multiplies a single stat per owned level (product over levels).
 #   attack_speed -> cooldown multiplier (< 1 makes weapons fire faster)

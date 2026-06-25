@@ -58,6 +58,8 @@ def make_defs(
                 projectile_speed=14.0,
                 projectile_ttl=1.2,
                 targeting="nearest",
+                glyph="-",
+                color="white",
             ),
             "magic_bolt": WeaponDef(
                 name="magic_bolt",
@@ -68,6 +70,8 @@ def make_defs(
                 projectile_speed=10.0,
                 projectile_ttl=1.6,
                 targeting="nearest_or_random",
+                glyph="*",
+                color="cyan",
             ),
             "swing": WeaponDef(
                 name="swing",
@@ -80,6 +84,8 @@ def make_defs(
                 targeting="forward_arc",
                 arc_range=5.0,
                 arc_half_width=0.3,
+                glyph=")",
+                color="red",
             ),
             "dagger_evolved": WeaponDef(
                 name="dagger_evolved",
@@ -91,6 +97,8 @@ def make_defs(
                 projectile_ttl=1.2,
                 targeting="nearest",
                 pierce=4,
+                glyph=">",
+                color="yellow",
             ),
         }
     if passives is None:

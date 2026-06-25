@@ -44,6 +44,11 @@ class WeaponDef:
     ``"forward_arc"`` resolves instant hits. ``pierce`` is how many enemies a
     projectile passes through (0 = stop on first hit); evolved weapons set it.
     The arc fields are only meaningful for ``"forward_arc"`` weapons.
+
+    ``glyph`` / ``color`` are render hints stamped onto the projectiles (or the
+    melee swing effect) this weapon fires, so each weapon reads distinctly on
+    screen. They default to the historical projectile look (``*`` / ``yellow``)
+    so a weapon that omits them keeps the prior appearance.
     """
 
     name: str
@@ -57,6 +62,8 @@ class WeaponDef:
     pierce: int = 0          # enemies a projectile passes through (0 = none)
     arc_range: float = 0.0       # forward_arc reach in world units
     arc_half_width: float = 0.0  # forward_arc cosine half-width (1 = forward only)
+    glyph: str = "*"         # render glyph for this weapon's projectile / effect
+    color: str = "yellow"    # render color for this weapon's projectile / effect
 
 
 @dataclass(frozen=True)
@@ -218,6 +225,8 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
             pierce=int(w.get("pierce", 0)),
             arc_range=float(w.get("arc_range", 0.0)),
             arc_half_width=float(w.get("arc_half_width", 0.0)),
+            glyph=str(w.get("glyph", "*")),
+            color=str(w.get("color", "yellow")),
         )
         for name, w in weapons_raw.items()
     }

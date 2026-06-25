@@ -242,6 +242,8 @@ def _fire_weapons(
                     ttl=spec.ttl,
                     team=player.team,
                     pierce=spec.pierce,
+                    glyph=wdef.glyph,
+                    color=wdef.color,
                 )
             )
         for hit in result.instant_hits:

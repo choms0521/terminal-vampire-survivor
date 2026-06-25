@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import random
 
+from dataclasses import replace
+
 from terminal_vs.rules.defs import EnemyDef
 from terminal_vs.sim.state import Enemy, Intent, new_run
 from terminal_vs.sim.step import (
     _PLAYER_FALLBACK_BASE_SPEED,
     _drop_xp_on_death,
+    _fire_weapons,
     _reference_move_speed,
     step,
 )
@@ -178,3 +181,51 @@ def test_kills_counter_counts_only_dead_enemies_once():
 
     assert state.kills == 2          # only the two dead enemies were counted
     assert len(state.pickups) == 2   # one xp gem dropped per kill
+
+
+def test_projectiles_carry_their_weapon_glyph_and_color():
+    """Each weapon stamps its own glyph/color onto the projectiles it fires, so
+    different weapons read distinctly on screen instead of sharing the default '*'.
+
+    Builds a player owning two distinct projectile weapons (dagger '-' white,
+    magic_bolt '*' cyan), both ready, with one enemy in range so each fires once,
+    then checks the spawned projectiles carry their own weapon's look.
+    """
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    # Own two projectile weapons, both off cooldown this tick.
+    state.build = replace(
+        state.build, weapon_levels=(("dagger", 1), ("magic_bolt", 1))
+    )
+    state.weapon_cooldowns = {"dagger": 0.0, "magic_bolt": 0.0}
+    # A single enemy in range: both nearest-targeting weapons aim at it and fire.
+    state.enemies.append(
+        Enemy(state.alloc_id(), state.player.x + 2.0, state.player.y, hp=100.0)
+    )
+
+    _fire_weapons(state, cfg, 1.0 / cfg.sim_tps, random.Random(0))
+
+    looks = {(p.glyph, p.color) for p in state.projectiles}
+    assert ("-", "white") in looks  # the dagger's dart
+    assert ("*", "cyan") in looks  # the magic_bolt's arcane bolt
+    assert len(looks) >= 2  # the two weapons are visually distinct
+
+
+def test_weapon_def_glyph_color_default_to_prior_look():
+    """A WeaponDef built without glyph/color falls back to the historical
+    projectile look ('*'/'yellow'), so weapon data predating the render hints
+    keeps its prior appearance (backward compatible)."""
+    from terminal_vs.rules.defs import WeaponDef
+
+    w = WeaponDef(
+        name="plain",
+        max_level=1,
+        cooldown=1.0,
+        damage=1.0,
+        projectile_count=1,
+        projectile_speed=1.0,
+        projectile_ttl=1.0,
+        targeting="nearest",
+    )
+    assert w.glyph == "*"
+    assert w.color == "yellow"
