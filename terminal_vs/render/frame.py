@@ -25,8 +25,10 @@ consumed here yet -- the diff renderer is deferred to Phase 2.
 
 from __future__ import annotations
 
+import math
+
 from ..config import Config
-from ..world import Camera, is_visible, world_to_cell
+from ..world import Camera, cell_to_world, is_visible, world_to_cell
 from .hud import draft_overlay_lines, hud_lines, overlay_lines
 
 # Empty floor cell. A single space both reads as "no entity here" and, once rows
@@ -44,8 +46,24 @@ _FLOOR_COLOR = ""
 # escapes; an unknown name falls back to the plain glyph so the emitter can never
 # raise on unexpected data. "magenta" is the swarm enemy color, added so the
 # swarm renders colored (Chunk 1 review follow-up); "cyan" is reserved for future
-# enemy/effect colors.
-_KNOWN_COLORS = ("white", "red", "yellow", "green", "magenta", "cyan")
+# enemy/effect colors. "bright_black" (dim gray) colors the background dot lattice
+# so it never competes visually with the white player or colored enemies.
+_KNOWN_COLORS = ("white", "red", "yellow", "green", "magenta", "cyan", "bright_black")
+
+# Background dot lattice -- the "moving through a world" cue. A sparse grid of
+# points fixed in WORLD space; because the camera keeps the player centered, the
+# points scroll past as the player moves, so an otherwise empty void reads as a
+# large traversable field. Spacing is in world units; x is scaled by aspect_x on
+# screen, so the values are chosen to read as a roughly even on-screen grid
+# (~8 cells wide x 3 cells tall at aspect_x = 2).
+_DOT_GLYPH = "·"  # middle dot
+# Dimmed so dots never compete with the white player / colored enemies. Only a
+# couple hundred dots are placed per frame (~130 in the default 100x30 viewport),
+# so coloring them does NOT hit the empty-floor byte budget (master 3.3) that keeps
+# the thousands of BLANK cells uncolored.
+_DOT_COLOR = "bright_black"
+_DOT_SPACING_X = 4.0  # world units; scaled by aspect_x -> ~8 cells between columns
+_DOT_SPACING_Y = 3.0  # world units; maps 1:1 to rows -> 3 rows between dot rows
 
 
 def compose_cells(state, cam: Camera, cfg: Config) -> list[list[tuple[str, str]]]:
@@ -64,6 +82,8 @@ def compose_cells(state, cam: Camera, cfg: Config) -> list[list[tuple[str, str]]
     grid: list[list[tuple[str, str]]] = [
         [(_FLOOR_GLYPH, _FLOOR_COLOR) for _ in range(width)] for _ in range(height)
     ]
+    # Lay the scrolling background dots first, under every entity layer.
+    _place_background_dots(grid, cam, cfg)
 
     def _place(entity) -> None:
         if not is_visible(entity.x, entity.y, cam, cfg):
@@ -85,6 +105,44 @@ def compose_cells(state, cam: Camera, cfg: Config) -> list[list[tuple[str, str]]
     _place(state.player)  # always-on-top (master 3.4)
 
     return grid
+
+
+def _place_background_dots(
+    grid: list[list[tuple[str, str]]], cam: Camera, cfg: Config
+) -> None:
+    """Seed the floor with a sparse, world-fixed dot lattice that scrolls.
+
+    The dots live on a fixed world-space grid; the player-following camera maps
+    them to shifting screen cells, so they scroll past as the player moves and the
+    void reads as a traversable field. Only the lattice points within the visible
+    band are iterated (far cheaper than testing every cell), each placed on its
+    floor cell; entity layers drawn afterwards overwrite any dot they share a cell
+    with, so the lattice stays strictly in the background.
+    """
+    width = cfg.viewport_w
+    height = cfg.viewport_h
+    # World bounds of the viewport corners. With the camera centered these bracket
+    # the visible region; cell_to_world is the exact inverse of world_to_cell on
+    # integer cells, so points derived here map back into the viewport.
+    wx0, wy0 = cell_to_world(0, 0, cam, cfg)
+    wx1, wy1 = cell_to_world(width - 1, height - 1, cam, cfg)
+    x_lo, x_hi = (wx0, wx1) if wx0 <= wx1 else (wx1, wx0)
+    y_lo, y_hi = (wy0, wy1) if wy0 <= wy1 else (wy1, wy0)
+    # Integer lattice indices spanning the band, padded by 1 each side so an edge
+    # point that rounds back into an edge cell is not dropped (which would make a
+    # row/column pop in a cell late while scrolling). Out-of-range cells are culled
+    # by the bounds check below.
+    i_lo = math.ceil(x_lo / _DOT_SPACING_X) - 1
+    i_hi = math.floor(x_hi / _DOT_SPACING_X) + 1
+    j_lo = math.ceil(y_lo / _DOT_SPACING_Y) - 1
+    j_hi = math.floor(y_hi / _DOT_SPACING_Y) + 1
+    for i in range(i_lo, i_hi + 1):
+        wx = i * _DOT_SPACING_X
+        for j in range(j_lo, j_hi + 1):
+            wy = j * _DOT_SPACING_Y
+            col, row = world_to_cell(wx, wy, cam, cfg)
+            if 0 <= col < width and 0 <= row < height:
+                grid[row][col] = (_DOT_GLYPH, _DOT_COLOR)
 
 
 def compose_frame(
