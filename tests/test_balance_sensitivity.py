@@ -17,7 +17,6 @@ from __future__ import annotations
 import random
 
 from terminal_vs.rules.defs import DirectorDef, EnemyDef, ReinforceStep
-from terminal_vs.sim.state import Intent
 
 from .conftest import make_config, make_defs
 from .support.sim_driver import run_until_gameover

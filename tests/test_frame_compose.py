@@ -17,6 +17,7 @@ from terminal_vs.render.frame import (
     compose_cells,
     compose_frame,
 )
+from terminal_vs.rules.leveling import Choice
 from terminal_vs.sim.state import Enemy, Pickup, Projectile, new_run
 from terminal_vs.world import world_to_cell
 
@@ -102,6 +103,26 @@ def test_compose_frame_play_mode_has_no_modal_panel():
     assert "PAUSED" not in frame
     assert "GAME OVER" not in frame
     assert "LEVEL UP" not in frame
+
+
+def test_compose_frame_draft_shows_in_play_mode_backward_compat():
+    """Backward-compat seam: a pending draft shows even when mode is left 'play'.
+
+    Callers that drive the level-up draft purely via ``state.pending_choices``
+    (the pre-mode behavior) must still get the overlay when ``mode`` is its
+    default. Locks the fallback in compose_frame so it cannot silently regress --
+    the render-overlay wire-test lesson applied to the new mode-threaded path.
+    """
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    state.pending_choices = (
+        Choice(kind="weapon_upgrade", label="dagger Lv2", target="dagger"),
+    )
+    frame = compose_frame(
+        state, state.camera, cfg, _identity_colorize, 100.0, mode="play"
+    )
+    assert "LEVEL UP" in frame       # draft still drawn at the default mode
+    assert "1) dagger Lv2" in frame
 
 
 def test_compose_frame_overlay_keeps_fixed_width():

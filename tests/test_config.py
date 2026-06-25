@@ -11,7 +11,7 @@ import textwrap
 
 import pytest
 
-from terminal_vs.config import Config, load_config
+from terminal_vs.config import Config, load_config, load_default_config
 
 # A minimal valid balance.toml shared by the tuning-focused tests below. The
 # balance schema itself is exercised in test_config_balance.py; here it just
@@ -189,3 +189,25 @@ def test_invalid_render_mode_raises_valueerror(tmp_path):
     with pytest.raises(ValueError) as exc:
         load_config(tuning, balance)
     assert "render_mode" in str(exc.value)
+
+
+def test_shipped_config_loads_and_validates():
+    """The repo's shipped config/tuning.toml + balance.toml load and validate.
+
+    Every other test builds Config / BalanceDefs synthetically (conftest helpers
+    or tmp_path TOMLs), so this is the single guard that the ACTUAL shipped
+    runtime artifacts parse and pass schema validation -- catching a typo or an
+    out-of-range edit (e.g. in the Phase 3 director-curve tune) before launch
+    rather than at game start.
+    """
+    cfg = load_default_config()
+
+    assert isinstance(cfg, Config)
+    assert cfg.sim_tps > 0
+    assert cfg.defs.weapons          # weapon content present
+    assert cfg.defs.enemies          # enemy content present
+    # The director reinforce curve parsed to its rows with non-decreasing minutes
+    # (the order sim/spawn's active-step lookup relies on).
+    minutes = [step.minute for step in cfg.defs.director.reinforce_steps]
+    assert minutes  # non-empty
+    assert minutes == sorted(minutes)
