@@ -223,3 +223,5 @@ def test_shipped_config_loads_and_validates():
     assert weapons["swing"].effect_ttl == 0.15  # the swing-visual lifetime
     assert weapons["lance"].pierce == 99  # lance pierces a whole line
     assert weapons["nova"].targeting == "radial"  # nova is the 360-deg burst
+    assert weapons["orbit"].targeting == "orbit"  # orbit revolves around the player
+    assert weapons["orbit"].orbit_radius == 4.0  # the ring radius

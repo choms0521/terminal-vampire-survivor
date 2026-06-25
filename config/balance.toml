@@ -109,6 +109,23 @@ targeting        = "radial"
 glyph            = "o"
 color            = "magenta"
 
+# Orbit: a defensive aura of glyphs that revolve around the player (targeting
+# "orbit"). ttl-bounded and respawned each cooldown -- the projectile_ttl < cooldown
+# relationship is load-bearing (it restores the per-life hit_ids re-hit cadence).
+[weapons.orbit]
+max_level           = 8
+cooldown            = 3.0    # respawn cadence -> the re-hit cadence
+damage              = 6.0
+projectile_count    = 3      # 3 orbiting glyphs, evenly spaced on the ring
+projectile_speed    = 0.0    # orbit uses angular speed, not linear velocity
+projectile_ttl      = 2.8    # < cooldown so the ring respawns before it lapses
+targeting           = "orbit"
+pierce              = 99     # one life sweeps many distinct enemies (hit_ids guards re-hit)
+orbit_radius        = 4.0    # ring radius in world units
+orbit_angular_speed = 3.0    # revolution speed (radians / second)
+glyph               = "O"
+color               = "cyan"
+
 # Passives. Each multiplies a single stat per owned level (product over levels).
 #   attack_speed -> cooldown multiplier (< 1 makes weapons fire faster)
 #   move_speed   -> movement multiplier (> 1 makes the player faster)

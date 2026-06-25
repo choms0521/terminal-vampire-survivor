@@ -30,7 +30,7 @@ Blessed-free.
 from __future__ import annotations
 
 import random
-from math import hypot
+from math import cos, hypot, sin
 
 from ..config import Config
 from ..rules import damage as rules_damage
@@ -233,11 +233,19 @@ def _fire_weapons(
         if not result.fired:
             continue
         for spec in result.projectiles:
+            # Orbit shots spawn ON the ring (player + r*(cos,sin) at the spec's
+            # angle) so there is no one-frame center-glyph artifact; straight shots
+            # spawn at the player.
+            if spec.orbit_radius > 0.0:
+                spawn_x = player.x + spec.orbit_radius * cos(spec.orbit_angle)
+                spawn_y = player.y + spec.orbit_radius * sin(spec.orbit_angle)
+            else:
+                spawn_x, spawn_y = player.x, player.y
             state.projectiles.append(
                 Projectile(
                     entity_id=state.alloc_id(),
-                    x=player.x,
-                    y=player.y,
+                    x=spawn_x,
+                    y=spawn_y,
                     vx=spec.vx,
                     vy=spec.vy,
                     damage=spec.damage,
@@ -246,6 +254,9 @@ def _fire_weapons(
                     pierce=spec.pierce,
                     glyph=wdef.glyph,
                     color=wdef.color,
+                    orbit_radius=spec.orbit_radius,
+                    orbit_angle=spec.orbit_angle,
+                    orbit_angular_speed=spec.orbit_angular_speed,
                 )
             )
         for hit in result.instant_hits:
@@ -263,10 +274,22 @@ def _fire_weapons(
 
 # --- Stage 5: projectile move + ttl ------------------------------------------
 def _advance_projectiles(state: SimState, dt: float) -> None:
-    """Integrate projectile positions and decrement their ttl in place."""
+    """Integrate projectile positions and decrement their ttl in place.
+
+    Orbit projectiles (``orbit_radius > 0``) revolve around the player instead of
+    flying straight: the angle advances by ``orbit_angular_speed * dt`` and the
+    position is recomputed on the ring around the CURRENT player position, so the
+    aura follows the player. ttl counts down for both kinds (the ring is bounded).
+    """
+    px, py = state.player.x, state.player.y
     for proj in state.projectiles:
-        proj.x += proj.vx * dt
-        proj.y += proj.vy * dt
+        if proj.orbit_radius > 0.0:
+            proj.orbit_angle += proj.orbit_angular_speed * dt
+            proj.x = px + proj.orbit_radius * cos(proj.orbit_angle)
+            proj.y = py + proj.orbit_radius * sin(proj.orbit_angle)
+        else:
+            proj.x += proj.vx * dt
+            proj.y += proj.vy * dt
         proj.ttl -= dt
 
 

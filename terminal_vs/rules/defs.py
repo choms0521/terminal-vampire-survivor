@@ -68,6 +68,8 @@ class WeaponDef:
     effect_ttl: float = 0.0    # forward_arc swing visual lifetime (sec); must
     # exceed one tick (1 / sim_tps) to ever render -- it is created and aged the
     # same tick, so a ttl <= dt is culled before any frame draws it (0 = no effect).
+    orbit_radius: float = 0.0         # orbit ring radius (world units); 0 = not an orbit
+    orbit_angular_speed: float = 0.0  # orbit revolution speed (radians / second)
 
 
 @dataclass(frozen=True)
@@ -233,6 +235,8 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
             color=str(w.get("color", "yellow")),
             spread_angle=float(w.get("spread_angle", 0.0)),
             effect_ttl=float(w.get("effect_ttl", 0.0)),
+            orbit_radius=float(w.get("orbit_radius", 0.0)),
+            orbit_angular_speed=float(w.get("orbit_angular_speed", 0.0)),
         )
         for name, w in weapons_raw.items()
     }

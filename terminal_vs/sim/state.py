@@ -177,6 +177,9 @@ class Projectile:
         pierce: int = 0,
         glyph: str = "*",
         color: str = "yellow",
+        orbit_radius: float = 0.0,
+        orbit_angle: float = 0.0,
+        orbit_angular_speed: float = 0.0,
     ) -> None:
         self.id: int = entity_id
         self.x: float = x
@@ -189,6 +192,12 @@ class Projectile:
         self.pierce: int = pierce
         self.glyph: str = glyph
         self.color: str = color
+        # Orbit motion (radius 0 = a normal straight projectile). When
+        # orbit_radius > 0 the sim ignores vx/vy and revolves this projectile
+        # around the player at orbit_angular_speed from the current orbit_angle.
+        self.orbit_radius: float = orbit_radius
+        self.orbit_angle: float = orbit_angle
+        self.orbit_angular_speed: float = orbit_angular_speed
         # Fresh set per projectile -- NEVER use a mutable default argument here.
         self.hit_ids: set[int] = set()
 

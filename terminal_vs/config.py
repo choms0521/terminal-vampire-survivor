@@ -113,7 +113,7 @@ _DEFAULT_EVOLUTION_NAMES: tuple[str, ...] = ("dagger_x",)
 
 # Targeting strategies a weapon may declare (validated on load).
 _VALID_TARGETING: frozenset[str] = frozenset(
-    {"nearest", "nearest_or_random", "forward_arc", "radial"}
+    {"nearest", "nearest_or_random", "forward_arc", "radial", "orbit"}
 )
 
 
@@ -225,6 +225,21 @@ def _validate_weapon(name: str, w: dict) -> None:
                 f"config: weapons.{name}.arc_half_width must be in [-1.0, 1.0], "
                 f"got {ahw!r} (check config/balance.toml)"
             )
+    elif w["targeting"] == "orbit":
+        # Orbit: shots revolve at orbit_angular_speed at orbit_radius around the
+        # player. Linear projectile_speed is unused (it may be 0), so instead the
+        # radius and angular speed must be positive, plus a count and a ttl.
+        _require_positive(
+            f"weapons.{name}.orbit_radius", float(w.get("orbit_radius", 0.0))
+        )
+        _require_positive(
+            f"weapons.{name}.orbit_angular_speed",
+            float(w.get("orbit_angular_speed", 0.0)),
+        )
+        _require_positive(
+            f"weapons.{name}.projectile_count", w["projectile_count"]
+        )
+        _require_positive(f"weapons.{name}.projectile_ttl", w["projectile_ttl"])
     else:
         # Projectile weapons must travel, fire at least one projectile, and give
         # that projectile a positive lifetime. A count or ttl of 0 on a projectile

@@ -320,3 +320,34 @@ def test_radial_nova_stays_idle_with_no_enemies():
     assert result.fired is False
     assert result.new_cooldown == 0.0  # ready to retry next tick
     assert result.projectiles == ()
+
+
+def test_orbit_returns_a_ring_of_orbiting_specs():
+    """An orbit weapon returns projectile_count specs carrying the ring radius and
+    angular speed, with initial angles tiling the circle once and zero linear
+    velocity (the sim moves them on the ring, not by vx/vy)."""
+    from math import isclose, pi
+
+    ctx = _ctx(weapon="orbit", enemies=((0, 3.0, 0.0),), dt=1.0)
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    assert result.fired is True
+    specs = result.projectiles
+    assert len(specs) == 3  # projectile_count orbiting glyphs
+
+    for s in specs:
+        assert (s.vx, s.vy) == (0.0, 0.0)  # orbit motion is not linear velocity
+        assert s.orbit_radius == 4.0  # the ring radius
+        assert s.orbit_angular_speed == 3.0  # it revolves
+    # Initial angles tile the circle exactly once: i * 2*pi/3.
+    angles = sorted(s.orbit_angle for s in specs)
+    expected = sorted((i * 2 * pi / 3) for i in range(3))
+    for got, want in zip(angles, expected):
+        assert isclose(got, want, abs_tol=1e-9)
+
+
+def test_orbit_stays_idle_with_no_enemies():
+    """Orbit fires (spawns its ring) only when an enemy is present."""
+    ctx = _ctx(weapon="orbit", enemies=(), dt=1.0)
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    assert result.fired is False
+    assert result.projectiles == ()

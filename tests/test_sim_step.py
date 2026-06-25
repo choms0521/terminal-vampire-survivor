@@ -270,3 +270,60 @@ def test_swing_effects_expire_and_are_cleaned_up():
     for _ in range(5):
         step(state, Intent(0, 0), cfg, random.Random(0))
     assert state.effects == []  # all expired and cleaned up
+
+
+def test_orbit_projectiles_revolve_on_the_ring_around_the_player():
+    """Orbit projectiles stay at orbit_radius from the player and advance their
+    angle each tick -- they revolve rather than flying off in a straight line."""
+    from math import hypot
+
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    state.build = replace(state.build, weapon_levels=(("orbit", 1),))
+    state.weapon_cooldowns = {"orbit": 0.0}
+    state.enemies.append(
+        Enemy(state.alloc_id(), state.player.x + 10.0, state.player.y, hp=1e9, kind="pinned")
+    )
+
+    step(state, Intent(0, 0), cfg, random.Random(0))  # fire the ring
+    orbiters = [p for p in state.projectiles if p.orbit_radius > 0.0]
+    assert orbiters  # the ring spawned
+    a0 = orbiters[0].orbit_angle
+
+    for _ in range(5):
+        step(state, Intent(0, 0), cfg, random.Random(0))
+        for p in state.projectiles:
+            if p.orbit_radius > 0.0:
+                d = hypot(p.x - state.player.x, p.y - state.player.y)
+                assert abs(d - p.orbit_radius) < 1e-6  # stays exactly on the ring
+
+    moved = [p for p in state.projectiles if p.orbit_radius > 0.0]
+    assert moved and moved[0].orbit_angle != a0  # it actually revolved
+
+
+def test_orbit_damages_an_enemy_repeatedly_over_time():
+    """The orbit ring deals damage as it sweeps past an enemy and, respawned each
+    cooldown, RE-HITS it across lives (genuine DoT, not a one-hit cosmetic ring).
+
+    Pin an enemy on the ring (a kind with no EnemyDef, so it stays put) and run
+    well past several cooldowns. One orbit life can strike this single enemy at
+    most once per orbiting shot (the per-projectile hit_ids guard), i.e. at most
+    ``count * damage``. Exceeding that proves the respawn re-hit cadence works --
+    the DoT proof, distinct from merely drawing the ring.
+    """
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    state.build = replace(state.build, weapon_levels=(("orbit", 1),))
+    state.weapon_cooldowns = {"orbit": 0.0}
+    # kind 'pinned' has no EnemyDef, so the enemy is stationary on the ring (r=4).
+    state.enemies.append(
+        Enemy(state.alloc_id(), state.player.x + 4.0, state.player.y, hp=1e9, kind="pinned")
+    )
+    hp0 = state.enemies[0].hp
+
+    for _ in range(200):  # cooldown 3.0s = 60 ticks -> several respawns
+        step(state, Intent(0, 0), cfg, random.Random(0))
+
+    dmg = hp0 - state.enemies[0].hp
+    wdef = cfg.defs.weapons["orbit"]
+    assert dmg > wdef.projectile_count * wdef.damage  # re-hit across lives, not one-shot

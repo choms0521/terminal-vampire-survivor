@@ -8,7 +8,7 @@ a :class:`WeaponFireResult` value -- the projectiles or instant hits to spawn an
 the updated cooldown. It never mutates its inputs and never touches buffers; the
 sim layer (Chunk 2) applies the result in place.
 
-Four targeting strategies (selected by ``weapon_def.targeting``):
+Five targeting strategies (selected by ``weapon_def.targeting``):
 
   * ``"nearest"``            - one projectile salvo aimed at the nearest enemy.
   * ``"nearest_or_random"``  - aim at the nearest enemy; distance ties are broken
@@ -19,6 +19,10 @@ Four targeting strategies (selected by ``weapon_def.targeting``):
   * ``"radial"``             - a 360-degree burst around the player (crowd-clear
                                nova), independent of any target; fires only when
                                at least one enemy is present.
+  * ``"orbit"``              - projectiles revolve around the player as an aura
+                               (the sim moves them on a ring); ttl-bounded and
+                               respawned each cooldown. Fires only when an enemy
+                               is present.
 
 Determinism: aspect distance uses :func:`terminal_vs.world.sq_dist_aspect_x` (the
 single on-screen-distance definition) with ``ctx.aspect_x``, and the "nearest"
@@ -58,6 +62,12 @@ class ProjectileSpec:
     damage: float
     ttl: float
     pierce: int = 0
+    # Orbit fields (radius 0 = a normal straight projectile). When orbit_radius >
+    # 0 the sim ignores vx/vy and revolves the projectile around the player at
+    # orbit_angular_speed, starting from orbit_angle (an orbiting aura weapon).
+    orbit_radius: float = 0.0
+    orbit_angle: float = 0.0
+    orbit_angular_speed: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -247,6 +257,41 @@ def _make_radial(ctx: FireContext) -> tuple[ProjectileSpec, ...]:
     return tuple(specs)
 
 
+def _make_orbit(ctx: FireContext) -> tuple[ProjectileSpec, ...]:
+    """Build an orbiting ring: ``projectile_count`` shots circling the player.
+
+    Each shot starts at angle ``i * 2*pi / count`` and revolves at
+    ``orbit_angular_speed``; the sim places and moves it on the ring (``vx``/``vy``
+    are 0 -- orbit motion is not linear velocity).
+
+    CRITICAL coupling: orbit is ttl-bounded and RESPAWNED each cooldown. A
+    ``Projectile.hit_ids`` guard lets a single orbit life damage each enemy only
+    ONCE; respawning each cooldown is what restores the re-hit cadence (every new
+    life starts with an empty ``hit_ids``). Making orbit persistent (no respawn)
+    would silently turn it into a one-hit cosmetic ring -- so the
+    ``projectile_ttl < cooldown`` relationship in balance.toml is load-bearing,
+    not incidental. ``pierce`` must be large so one life sweeps many enemies.
+    """
+    weapon = ctx.weapon_def
+    count = max(1, weapon.projectile_count)
+    specs: list[ProjectileSpec] = []
+    for i in range(count):
+        angle = i * (2.0 * pi / count)
+        specs.append(
+            ProjectileSpec(
+                vx=0.0,
+                vy=0.0,
+                damage=weapon.damage,
+                ttl=weapon.projectile_ttl,
+                pierce=weapon.pierce,
+                orbit_radius=weapon.orbit_radius,
+                orbit_angle=angle,
+                orbit_angular_speed=weapon.orbit_angular_speed,
+            )
+        )
+    return tuple(specs)
+
+
 def _make_forward_arc_hits(ctx: FireContext) -> tuple[InstantHitSpec, ...]:
     """Return instant hits on enemies inside the forward arc (melee swing).
 
@@ -373,6 +418,16 @@ def tick_weapon(
             return WeaponFireResult(fired=False, new_cooldown=_READY_IDLE_COOLDOWN)
         return WeaponFireResult(
             fired=True, new_cooldown=reset, projectiles=_make_radial(ctx)
+        )
+
+    if ctx.weapon_def.targeting == "orbit":
+        # Orbiting aura: spawn a fresh ring (ttl-bounded; respawn each cooldown is
+        # what restores the re-hit cadence -- see _make_orbit). Like radial, fire
+        # only when there is something to defend against (no enemies -> idle).
+        if not ctx.enemy_positions:
+            return WeaponFireResult(fired=False, new_cooldown=_READY_IDLE_COOLDOWN)
+        return WeaponFireResult(
+            fired=True, new_cooldown=reset, projectiles=_make_orbit(ctx)
         )
 
     target = _select_target(ctx, rng)

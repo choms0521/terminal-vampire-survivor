@@ -127,6 +127,21 @@ def make_defs(
                 glyph="o",
                 color="magenta",
             ),
+            "orbit": WeaponDef(
+                name="orbit",
+                max_level=8,
+                cooldown=3.0,
+                damage=6.0,
+                projectile_count=3,
+                projectile_speed=0.0,
+                projectile_ttl=2.8,
+                targeting="orbit",
+                pierce=99,
+                glyph="O",
+                color="cyan",
+                orbit_radius=4.0,
+                orbit_angular_speed=3.0,
+            ),
         }
     if passives is None:
         passives = {
