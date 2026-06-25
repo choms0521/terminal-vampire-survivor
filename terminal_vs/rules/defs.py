@@ -65,7 +65,9 @@ class WeaponDef:
     glyph: str = "*"         # render glyph for this weapon's projectile / effect
     color: str = "yellow"    # render color for this weapon's projectile / effect
     spread_angle: float = 0.0  # total fan angle (deg) across multi-shot; 0 = stacked
-    effect_ttl: float = 0.0    # forward_arc swing-visual lifetime (sec); 0 = no effect
+    effect_ttl: float = 0.0    # forward_arc swing visual lifetime (sec); must
+    # exceed one tick (1 / sim_tps) to ever render -- it is created and aged the
+    # same tick, so a ttl <= dt is culled before any frame draws it (0 = no effect).
 
 
 @dataclass(frozen=True)

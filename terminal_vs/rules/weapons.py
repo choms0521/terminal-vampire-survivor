@@ -194,8 +194,10 @@ def _make_projectiles(
     for i in range(count):
         # Even fan: shot i sits at angle -spread/2 + i*(spread/(count-1)) off the
         # aim. One shot (or zero spread) -> offset 0 -> the rotation is the
-        # identity, so the velocity is bit-for-bit the old straight-at-target shot
-        # (speed * unit aim). Rotating the unit aim avoids an atan2 round-trip.
+        # identity, so the velocity is mathematically identical to the old
+        # straight-at-target shot (speed * unit aim) -- it differs only by ~1 ulp
+        # of floating-point reassociation (old dx*(speed/dist) vs speed*(dx/dist)).
+        # Rotating the unit aim avoids an atan2 round-trip.
         offset = 0.0 if count == 1 else -spread / 2.0 + spread * i / (count - 1)
         c = cos(offset)
         s = sin(offset)
