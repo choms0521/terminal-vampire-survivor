@@ -9,9 +9,10 @@ from __future__ import annotations
 import random
 
 from terminal_vs.rules.defs import EnemyDef
-from terminal_vs.sim.state import Intent, new_run
+from terminal_vs.sim.state import Enemy, Intent, new_run
 from terminal_vs.sim.step import (
     _PLAYER_FALLBACK_BASE_SPEED,
+    _drop_xp_on_death,
     _reference_move_speed,
     step,
 )
@@ -156,3 +157,24 @@ def test_reference_move_speed_empty_enemies_uses_guard():
     """The degenerate no-enemy table falls back to the fixed guard, not a crash."""
     defs = make_defs(enemies={})
     assert _reference_move_speed(defs) == _PLAYER_FALLBACK_BASE_SPEED
+
+
+def test_kills_counter_counts_only_dead_enemies_once():
+    """The death stage tallies one kill per dead enemy and ignores live ones.
+
+    ``_drop_xp_on_death`` runs the single tick an enemy is dead (stage 6 set its
+    hp <= 0, stage 9 cleanup removes it next), so it both drops a gem and bumps
+    ``state.kills`` exactly once per kill. A live enemy in the same buffer must
+    not be counted. This is the unit guard for the HUD / balance kill metric.
+    """
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    assert state.kills == 0  # a fresh run has no kills
+    state.enemies.append(Enemy(state.alloc_id(), 1.0, 0.0, hp=0.0))   # dead
+    state.enemies.append(Enemy(state.alloc_id(), 2.0, 0.0, hp=5.0))   # alive
+    state.enemies.append(Enemy(state.alloc_id(), 3.0, 0.0, hp=-1.0))  # dead
+
+    _drop_xp_on_death(state, random.Random(0))
+
+    assert state.kills == 2          # only the two dead enemies were counted
+    assert len(state.pickups) == 2   # one xp gem dropped per kill
