@@ -163,3 +163,25 @@ def test_gameover_restart_repaints_a_fresh_play_frame(capsys):
     assert any("GAME OVER" in f for f in frames)  # the game-over overlay was shown
     assert "GAME OVER" not in frames[-1]          # ended on a play frame (restarted)
     assert "100/100" in frames[-1]                # fresh full hp after the restart
+
+
+def test_pause_resume_repaints_a_play_frame(capsys):
+    """play -> 'p' pause overlay -> 'p' resume -> immediate play repaint.
+
+    Resuming from pause must repaint at once so the "PAUSED" panel clears
+    instantly; otherwise the just-reset accumulator yields zero steps on the next
+    play iteration and the play branch's render guard skips the repaint, leaving
+    the stale overlay on screen (a user-visible glitch). The captured frames must
+    show the PAUSED panel and then END on a play frame with no PAUSED text.
+    """
+    cfg = make_config()
+    rng = random.Random(0)
+    sim = new_run(cfg, rng)
+
+    term = _FakeTerm([_FakeKey("p"), _FakeKey("p"), _FakeKey("q")])
+    term.home = "<F>"  # frame separator so the captured frames can be split
+    run(term, cfg, rng, sim=sim)
+
+    frames = [f for f in capsys.readouterr().out.split("<F>") if f.strip()]
+    assert any("PAUSED" in f for f in frames)  # the pause overlay was shown
+    assert "PAUSED" not in frames[-1]          # resume repainted a clean play frame

@@ -259,6 +259,12 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
                 mode = _MODE_PLAY
                 last = monotonic()
                 accumulator = 0.0
+                # Repaint immediately on resume so the "PAUSED" panel clears at
+                # once. Otherwise the just-reset accumulator yields zero steps on
+                # the next play iteration, the play branch's "render only if a step
+                # ran or the mode changed" guard skips the repaint, and the stale
+                # PAUSED overlay lingers until the sim advances (a visible glitch).
+                render_frame(term, sim, sim.camera, cfg, max_hp, mode)
 
         elif mode == _MODE_GAMEOVER:
             # The frozen game-over frame stays until restart or quit (quit is
