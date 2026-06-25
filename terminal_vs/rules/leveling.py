@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from random import Random
 
-from .defs import BalanceDefs, EvolutionDef
+from .defs import STARTING_WEAPON, BalanceDefs, EvolutionDef
 from .evolution import apply_evolution, eligible_evolutions
 
 # Choice kinds (the upgrade families a draft card can represent).
@@ -58,7 +58,7 @@ class BuildState:
     starting build is ``BuildState(weapon_levels=(("dagger", 1),))``.
     """
 
-    weapon_levels: tuple[tuple[str, int], ...] = (("dagger", 1),)
+    weapon_levels: tuple[tuple[str, int], ...] = ((STARTING_WEAPON, 1),)
     passive_levels: tuple[tuple[str, int], ...] = ()
     level: int = 1
     xp: float = 0.0

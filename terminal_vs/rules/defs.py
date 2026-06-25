@@ -16,13 +16,23 @@ Design rules (master plan sections 5.5, 6 / ADR-001):
     of config also keeps the def schema testable in isolation.
   * No blessed, no side effects, no Chinese characters.
 
-The ``dict`` fields on :class:`BalanceDefs` (weapons / passives / enemies) are
-treated as read-only by convention: callers index them but never mutate them.
+The name-keyed fields on :class:`BalanceDefs` (weapons / passives / enemies) are
+read-only mappings: ``build_defs`` wraps them in :class:`types.MappingProxyType`
+so callers index them but cannot mutate the shared balance table at runtime.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
+
+# The weapon a run begins owning (rules.leveling.BuildState's default). Defined
+# here in the cycle-free base module (config and leveling both import defs but not
+# each other through it) so the starting weapon has a single source of truth:
+# BuildState reads it for the default build, and config-load validates that a
+# user-provided [weapons.*] section defines it.
+STARTING_WEAPON = "dagger"
 
 
 @dataclass(frozen=True)
@@ -143,15 +153,24 @@ class BalanceDefs:
     """Immutable container of every balance table injected into the rules layer.
 
     Built by :func:`build_defs` from a validated balance.toml dict and stored on
-    ``Config.defs``. The ``weapons`` / ``passives`` / ``enemies`` dicts are
-    read-only by convention (index, never mutate). ``evolutions`` is a tuple so
-    iteration order is deterministic. ``magnet_range`` is the base pickup radius
-    that the magnet passive multiplies.
+    ``Config.defs``. The ``weapons`` / ``passives`` / ``enemies`` mappings are
+    read-only: ``build_defs`` wraps them in :class:`types.MappingProxyType`, so a
+    runtime ``cfg.defs.weapons[...] = ...`` raises rather than silently mutating
+    the shared balance table (the ADR-001 immutability boundary, now enforced not
+    just documented). ``evolutions`` is a tuple so iteration order is
+    deterministic. ``magnet_range`` is the base pickup radius that the magnet
+    passive multiplies.
     """
 
-    weapons: dict[str, WeaponDef] = field(default_factory=dict)
-    passives: dict[str, PassiveDef] = field(default_factory=dict)
-    enemies: dict[str, EnemyDef] = field(default_factory=dict)
+    weapons: Mapping[str, WeaponDef] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    passives: Mapping[str, PassiveDef] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    enemies: Mapping[str, EnemyDef] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
     evolutions: tuple[EvolutionDef, ...] = ()
     director: DirectorDef = field(
         default_factory=lambda: DirectorDef(2.0, 0.4, (ReinforceStep(0, 1.0, 1),))
@@ -258,9 +277,12 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
     magnet_range = float(pickup_raw["magnet_range"])
 
     return BalanceDefs(
-        weapons=weapons,
-        passives=passives,
-        enemies=enemies,
+        # Wrap the name-keyed tables in read-only proxies so the immutability
+        # boundary holds at runtime: the rules/sim layers index these but can
+        # never mutate the shared balance table through cfg.defs.
+        weapons=MappingProxyType(weapons),
+        passives=MappingProxyType(passives),
+        enemies=MappingProxyType(enemies),
         evolutions=evolutions,
         director=director,
         leveling=leveling,

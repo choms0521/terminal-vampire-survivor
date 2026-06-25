@@ -133,6 +133,41 @@ def test_load_balance_returns_immutable(tmp_path):
         cfg.defs.leveling.draft_choices = 7  # type: ignore[misc]
 
 
+def test_balance_defs_mappings_are_read_only(tmp_path):
+    """The weapons/passives/enemies tables are read-only mappings, not bare dicts.
+
+    A frozen dataclass does not deep-freeze mutable fields, so build_defs wraps the
+    name-keyed tables in MappingProxyType. Mutating one through cfg.defs must raise
+    (the ADR-001 immutability boundary enforced at runtime), while reads still work.
+    """
+    cfg = _load(tmp_path)
+    # Reads still work.
+    assert cfg.defs.weapons["dagger"].cooldown == 1.2
+    # Writes / deletes / inserts raise.
+    with pytest.raises(TypeError):
+        cfg.defs.weapons["dagger"] = None  # type: ignore[index,assignment]
+    with pytest.raises(TypeError):
+        cfg.defs.passives["new"] = None  # type: ignore[index,assignment]
+    with pytest.raises(TypeError):
+        del cfg.defs.enemies["walker"]  # type: ignore[attr-defined]
+
+
+def test_missing_starting_weapon_raises(tmp_path):
+    """A user-provided [weapons.*] section that omits the starting weapon raises.
+
+    A run begins owning the BuildState default weapon; if the balance file defines
+    weapons but not that one, the run would start holding a weapon with no stats.
+    Config rejects it at load time, naming the weapon and the file.
+    """
+    # Rename the dagger section so a weapons section exists but 'dagger' is absent.
+    bad = VALID_BALANCE.replace("[weapons.dagger]", "[weapons.knife]")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, bad)
+    msg = str(exc.value)
+    assert "dagger" in msg
+    assert "config/balance.toml" in msg
+
+
 def test_missing_key_falls_back_to_default(tmp_path):
     """A weapon entry missing keys falls back to code defaults for those keys."""
     # dagger present but only declares cooldown; the rest fall back.

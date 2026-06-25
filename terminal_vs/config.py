@@ -39,7 +39,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from .rules.defs import BalanceDefs, build_defs
+from .rules.defs import STARTING_WEAPON, BalanceDefs, build_defs
 
 # --- Code-default fallbacks (string-keyed; never named perf constants) ---------
 # Each value is reached via a key string, so this file contains no
@@ -336,6 +336,19 @@ def _normalized_balance(balance_data: dict) -> dict:
         w = _merged_section(weapons_raw, name, _WEAPON_DEFAULTS)
         _validate_weapon(name, w)
         weapons[name] = w
+
+    # A run begins owning the starting weapon (rules.leveling.BuildState's
+    # default). If the user provided a [weapons.*] section it must define that
+    # weapon -- otherwise the run starts holding a weapon with no WeaponDef, which
+    # never fires and skews the level-up draft pool. When no weapons section is
+    # given the default content set (which includes it) is used, so this only
+    # guards user-authored balance files.
+    if weapons_raw and STARTING_WEAPON not in weapons:
+        raise ValueError(
+            f"config: the starting weapon {STARTING_WEAPON!r} must be defined in "
+            f"[weapons.*] (a run begins owning it); add it or the run starts with "
+            f"a weapon that has no stats (check config/balance.toml)"
+        )
 
     passives_raw = balance_data.get("passives", {})
     passive_names = list(passives_raw) or list(_DEFAULT_PASSIVE_NAMES)

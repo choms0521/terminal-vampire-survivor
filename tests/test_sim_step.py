@@ -8,10 +8,15 @@ from __future__ import annotations
 
 import random
 
+from terminal_vs.rules.defs import EnemyDef
 from terminal_vs.sim.state import Intent, new_run
-from terminal_vs.sim.step import step
+from terminal_vs.sim.step import (
+    _PLAYER_FALLBACK_BASE_SPEED,
+    _reference_move_speed,
+    step,
+)
 
-from .conftest import make_config
+from .conftest import make_config, make_defs
 
 
 def _snapshot(state) -> tuple:
@@ -114,3 +119,40 @@ def test_run_progresses_toward_levelup_with_default_seed():
             saw_pending = True
             break
     assert saw_pending is True
+
+
+def _enemy(name: str, move_speed: float) -> EnemyDef:
+    return EnemyDef(
+        name=name,
+        hp=10.0,
+        move_speed=move_speed,
+        spawn_weight=1.0,
+        glyph="z",
+        color="red",
+    )
+
+
+def test_reference_move_speed_prefers_walker():
+    """With the reference kind present, the player's base speed reads walker's."""
+    defs = make_defs(
+        enemies={"walker": _enemy("walker", 2.5), "swarm": _enemy("swarm", 5.0)}
+    )
+    assert _reference_move_speed(defs) == 2.5
+
+
+def test_reference_move_speed_falls_back_to_slowest_without_walker():
+    """A data-driven balance without 'walker' must not KeyError; uses the slowest.
+
+    Regression for the direct cfg.defs.enemies["walker"] index that crashed the sim
+    when a custom enemy set omitted the reference kind.
+    """
+    defs = make_defs(
+        enemies={"swarm": _enemy("swarm", 5.0), "brute": _enemy("brute", 3.0)}
+    )
+    assert _reference_move_speed(defs) == 3.0
+
+
+def test_reference_move_speed_empty_enemies_uses_guard():
+    """The degenerate no-enemy table falls back to the fixed guard, not a crash."""
+    defs = make_defs(enemies={})
+    assert _reference_move_speed(defs) == _PLAYER_FALLBACK_BASE_SPEED

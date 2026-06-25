@@ -36,6 +36,7 @@ from ..config import Config
 from ..rules import damage as rules_damage
 from ..rules import leveling as rules_leveling
 from ..rules import weapons as rules_weapons
+from ..rules.defs import BalanceDefs
 from .spatial import SpatialHash
 from .spawn import maybe_spawn
 from .state import (
@@ -66,6 +67,12 @@ _XP_GEM_VALUE = 1.0
 _PLAYER_SPEED_MULT = 1.5
 # Reference enemy kind whose move speed defines the player's base speed.
 _PLAYER_SPEED_REFERENCE_KIND = "walker"
+# Degenerate fallback base speed, used ONLY when a balance defines no enemies at
+# all -- unreachable via load_config (which always injects a default enemy set),
+# so it is reachable only through a direct BalanceDefs construction in tests. It
+# is a guard so _apply_input never fails on an empty enemy table, NOT a tunable
+# balance dial; the normal path reads the reference (or slowest) enemy's speed.
+_PLAYER_FALLBACK_BASE_SPEED = 2.5
 # Spatial-hash bucket size (world units) used for collision queries.
 _COLLISION_CELL_SIZE = 2.0
 # Despawn distance: enemies/pickups farther than this many viewport-half-widths
@@ -100,6 +107,25 @@ def step(state: SimState, intent: Intent, cfg: Config, rng: random.Random) -> No
 
 
 # --- Stage 1: input ----------------------------------------------------------
+def _reference_move_speed(defs: BalanceDefs) -> float:
+    """Base enemy move speed the player's speed is measured against.
+
+    Prefers the configured reference kind (``_PLAYER_SPEED_REFERENCE_KIND``,
+    "walker"). If a data-driven balance omits that kind, fall back deterministically
+    to the SLOWEST defined enemy (min move_speed, name tie-break) so this never
+    KeyErrors on a custom enemy set -- mirroring the defensive ``.get()`` the enemy
+    AI already uses. The no-enemy case is degenerate (unreachable via load_config)
+    and uses a fixed guard value.
+    """
+    ref = defs.enemies.get(_PLAYER_SPEED_REFERENCE_KIND)
+    if ref is not None:
+        return ref.move_speed
+    if defs.enemies:
+        slowest = min(defs.enemies.values(), key=lambda e: (e.move_speed, e.name))
+        return slowest.move_speed
+    return _PLAYER_FALLBACK_BASE_SPEED
+
+
 def _apply_input(state: SimState, intent: Intent, cfg: Config, dt: float) -> None:
     """Set the player's velocity from the 8-direction intent and integrate it.
 
@@ -112,7 +138,7 @@ def _apply_input(state: SimState, intent: Intent, cfg: Config, dt: float) -> Non
     tick keeps the previous facing.
     """
     stats = rules_leveling.effective_stats(state.build, cfg.defs)
-    base_speed = cfg.defs.enemies[_PLAYER_SPEED_REFERENCE_KIND].move_speed
+    base_speed = _reference_move_speed(cfg.defs)
     speed = base_speed * _PLAYER_SPEED_MULT * stats.move_speed_mult
 
     dx = float(intent.dx)
