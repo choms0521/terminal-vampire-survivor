@@ -226,9 +226,19 @@ def _validate_weapon(name: str, w: dict) -> None:
                 f"got {ahw!r} (check config/balance.toml)"
             )
     else:
-        # Projectile weapons must travel.
+        # Projectile weapons must travel, fire at least one projectile, and give
+        # that projectile a positive lifetime. A count or ttl of 0 on a projectile
+        # weapon would silently produce no effective shots. forward_arc melee is
+        # handled in the branch above and legitimately carries zero projectile
+        # fields, so these strict-positive checks apply only here.
         _require_positive(
             f"weapons.{name}.projectile_speed", w["projectile_speed"]
+        )
+        _require_positive(
+            f"weapons.{name}.projectile_count", w["projectile_count"]
+        )
+        _require_positive(
+            f"weapons.{name}.projectile_ttl", w["projectile_ttl"]
         )
 
 
@@ -243,6 +253,47 @@ def _validate_enemy(name: str, e: dict) -> None:
     _require_positive(f"enemies.{name}.hp", e["hp"])
     _require_positive(f"enemies.{name}.move_speed", e["move_speed"])
     _require_positive(f"enemies.{name}.spawn_weight", e["spawn_weight"])
+
+
+def _validate_reinforce_steps(steps) -> None:
+    """Validate the director's per-minute reinforce table row by row.
+
+    Each row must be ``[minute, interval_mult, concurrent]`` with ``minute >= 0``,
+    ``interval_mult > 0``, ``concurrent >= 1``, and the minute thresholds must be
+    non-decreasing (sim/spawn's active-step lookup assumes ascending order). A
+    malformed or out-of-range row would make the director never spawn, spawn zero
+    enemies, or select steps unpredictably, so it is rejected at load time with a
+    message naming the offending row index and config/balance.toml.
+    """
+    prev_minute: float | None = None
+    for idx, row in enumerate(steps):
+        if not isinstance(row, (list, tuple)) or len(row) != 3:
+            raise ValueError(
+                f"config: director.reinforce_steps[{idx}] must be "
+                f"[minute, interval_mult, concurrent], got {row!r} "
+                f"(check config/balance.toml)"
+            )
+        minute, interval_mult, concurrent = row
+        if minute < 0:
+            raise ValueError(
+                f"config: director.reinforce_steps[{idx}].minute must be >= 0, "
+                f"got {minute!r} (check config/balance.toml)"
+            )
+        _require_positive(
+            f"director.reinforce_steps[{idx}].interval_mult", interval_mult
+        )
+        if int(concurrent) < 1:
+            raise ValueError(
+                f"config: director.reinforce_steps[{idx}].concurrent must be "
+                f">= 1, got {concurrent!r} (check config/balance.toml)"
+            )
+        if prev_minute is not None and minute < prev_minute:
+            raise ValueError(
+                f"config: director.reinforce_steps minutes must be "
+                f"non-decreasing, got {minute!r} after {prev_minute!r} at index "
+                f"{idx} (check config/balance.toml)"
+            )
+        prev_minute = minute
 
 
 def _normalized_balance(balance_data: dict) -> dict:
@@ -265,7 +316,16 @@ def _normalized_balance(balance_data: dict) -> dict:
     }
     _require_positive("leveling.draft_choices", leveling["draft_choices"])
     _require_positive("leveling.xp_curve_base", leveling["xp_curve_base"])
-    _require_positive("leveling.xp_curve_growth", leveling["xp_curve_growth"])
+    # The xp curve is base * growth ** (level - 1); rules.leveling.xp_for_level
+    # documents it as monotonically increasing, which holds only for growth > 1.0.
+    # A growth of <= 1.0 would make later levels require equal or *less* xp, which
+    # breaks progression and the determinism assumptions in tests/docs.
+    if leveling["xp_curve_growth"] <= 1.0:
+        raise ValueError(
+            f"config: leveling.xp_curve_growth must be > 1.0 (a monotonically "
+            f"increasing xp curve), got {leveling['xp_curve_growth']!r} "
+            f"(check config/balance.toml)"
+        )
 
     # Sections fall back to a default name set when absent, so the rules layer
     # always has at least the starting content.
@@ -327,6 +387,7 @@ def _normalized_balance(balance_data: dict) -> dict:
             "config: director.reinforce_steps must be non-empty "
             "(check config/balance.toml)"
         )
+    _validate_reinforce_steps(director["reinforce_steps"])
 
     pickup_raw = balance_data.get("pickup", {})
     magnet_range = _f(pickup_raw, "magnet_range", _PICKUP_DEFAULTS)

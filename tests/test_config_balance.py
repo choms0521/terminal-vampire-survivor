@@ -228,3 +228,105 @@ def test_arc_half_width_out_of_range_raises(tmp_path):
     msg = str(exc.value)
     assert "arc_half_width" in msg
     assert "config/balance.toml" in msg
+
+
+@pytest.mark.parametrize("growth", ["0.9", "1.0"])
+def test_xp_curve_growth_not_increasing_raises(tmp_path, growth):
+    """xp_curve_growth <= 1.0 (non-increasing curve) raises ValueError naming the key.
+
+    xp_for_level is documented as monotonically increasing (growth > 1); a growth
+    of 1.0 (flat) or below (decreasing) breaks that contract, so it must be rejected
+    at load time -- including the 1.0 boundary, not just values below it.
+    """
+    bad = VALID_BALANCE.replace("xp_curve_growth = 1.4", f"xp_curve_growth = {growth}")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, bad)
+    msg = str(exc.value)
+    assert "xp_curve_growth" in msg
+    assert "config/balance.toml" in msg
+
+
+def test_projectile_count_zero_on_projectile_weapon_raises(tmp_path):
+    """A projectile (non-forward_arc) weapon with projectile_count = 0 raises ValueError."""
+    bad = VALID_BALANCE.replace("projectile_count = 1", "projectile_count = 0")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, bad)
+    msg = str(exc.value)
+    assert "projectile_count" in msg
+    assert "config/balance.toml" in msg
+
+
+def test_projectile_ttl_zero_on_projectile_weapon_raises(tmp_path):
+    """A projectile (non-forward_arc) weapon with projectile_ttl = 0 raises ValueError."""
+    bad = VALID_BALANCE.replace("projectile_ttl   = 1.2", "projectile_ttl   = 0.0")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, bad)
+    msg = str(exc.value)
+    assert "projectile_ttl" in msg
+    assert "config/balance.toml" in msg
+
+
+def test_forward_arc_zero_projectile_fields_ok(tmp_path):
+    """A forward_arc melee weapon legitimately carries zero projectile fields.
+
+    Regression guard: the projectile_count/ttl strict-positive checks must apply
+    ONLY to projectile weapons, never to forward_arc melee, whose zero
+    count/speed/ttl are by design (its reach is arc_range).
+    """
+    cfg = _load(tmp_path)  # VALID_BALANCE's swing is forward_arc with zeros
+    swing = cfg.defs.weapons["swing"]
+    assert swing.targeting == "forward_arc"
+    assert swing.projectile_count == 0
+    assert swing.projectile_ttl == 0.0
+
+
+def test_reinforce_step_non_positive_interval_raises(tmp_path):
+    """A reinforce step with interval_mult <= 0 raises ValueError naming the key."""
+    bad = VALID_BALANCE.replace(
+        "reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+        "reinforce_steps = [[0, 1.0, 1], [1, -0.8, 2]]",
+    )
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, bad)
+    msg = str(exc.value)
+    assert "interval_mult" in msg
+    assert "config/balance.toml" in msg
+
+
+def test_reinforce_step_zero_concurrent_raises(tmp_path):
+    """A reinforce step with concurrent < 1 raises ValueError naming the key."""
+    bad = VALID_BALANCE.replace(
+        "reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+        "reinforce_steps = [[0, 1.0, 1], [1, 0.8, 0]]",
+    )
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, bad)
+    msg = str(exc.value)
+    assert "concurrent" in msg
+    assert "config/balance.toml" in msg
+
+
+def test_reinforce_steps_minutes_out_of_order_raises(tmp_path):
+    """Reinforce steps whose minute thresholds decrease raise ValueError."""
+    bad = VALID_BALANCE.replace(
+        "reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+        "reinforce_steps = [[5, 1.0, 1], [1, 0.8, 2]]",
+    )
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, bad)
+    msg = str(exc.value)
+    assert "non-decreasing" in msg
+    assert "config/balance.toml" in msg
+
+
+def test_reinforce_step_malformed_row_raises(tmp_path):
+    """A reinforce step row that is not [minute, interval_mult, concurrent] raises ValueError."""
+    bad = VALID_BALANCE.replace(
+        "reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+        "reinforce_steps = [[0, 1.0, 1], [1, 0.8]]",
+    )
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, bad)
+    msg = str(exc.value)
+    assert "reinforce_steps" in msg
+    assert "config/balance.toml" in msg
