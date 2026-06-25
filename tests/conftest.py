@@ -99,6 +99,7 @@ def make_defs(
                 pierce=4,
                 glyph=">",
                 color="yellow",
+                spread_angle=30.0,
             ),
         }
     if passives is None:

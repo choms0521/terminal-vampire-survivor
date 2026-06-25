@@ -26,7 +26,7 @@ blessed, no global state, no Chinese characters.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import hypot
+from math import cos, hypot, radians, sin
 from random import Random
 
 from ..world import sq_dist_aspect_x
@@ -148,11 +148,15 @@ def _make_projectiles(
 ) -> tuple[ProjectileSpec, ...]:
     """Build the projectile salvo aimed from the player at ``target``.
 
-    The direction is the plain Euclidean unit vector from player to target (a
-    projectile travels in real world space; aspect correction is screen-only),
-    scaled to the weapon's projectile speed. ``projectile_count`` shots and the
-    weapon's ``pierce`` are honored. Degenerate case: a target coinciding with
-    the player launches along +X, avoiding divide-by-zero on normalization.
+    The aim direction is the plain Euclidean angle from player to target (a
+    projectile travels in real world space; aspect correction is screen-only).
+    ``projectile_count`` shots are fanned evenly across ``spread_angle`` (total
+    cone in degrees) centered on that aim, so a multi-shot weapon visibly spreads
+    instead of stacking every shot on one line. A single shot -- or a weapon with
+    ``spread_angle == 0`` -- fires straight at the target (the historical
+    behavior, preserved for backward compatibility). The weapon's ``pierce`` is
+    honored on every shot. Degenerate case: a target coinciding with the player
+    aims along +X, avoiding a meaningless angle from a zero vector.
     """
     weapon = ctx.weapon_def
     px, py = ctx.player_pos
@@ -161,21 +165,34 @@ def _make_projectiles(
     dy = ty - py
     dist = hypot(dx, dy)
     if dist == 0.0:
-        vx = weapon.projectile_speed
-        vy = 0.0
+        ux, uy = 1.0, 0.0  # degenerate: target on the player -> aim +X
     else:
-        scale = weapon.projectile_speed / dist
-        vx = dx * scale
-        vy = dy * scale
-    spec = ProjectileSpec(
-        vx=vx,
-        vy=vy,
-        damage=weapon.damage,
-        ttl=weapon.projectile_ttl,
-        pierce=weapon.pierce,
-    )
+        ux, uy = dx / dist, dy / dist
+    speed = weapon.projectile_speed
+    spread = radians(weapon.spread_angle)
     count = max(1, weapon.projectile_count)
-    return tuple(spec for _ in range(count))
+
+    specs: list[ProjectileSpec] = []
+    for i in range(count):
+        # Even fan: shot i sits at angle -spread/2 + i*(spread/(count-1)) off the
+        # aim. One shot (or zero spread) -> offset 0 -> the rotation is the
+        # identity, so the velocity is bit-for-bit the old straight-at-target shot
+        # (speed * unit aim). Rotating the unit aim avoids an atan2 round-trip.
+        offset = 0.0 if count == 1 else -spread / 2.0 + spread * i / (count - 1)
+        c = cos(offset)
+        s = sin(offset)
+        rx = ux * c - uy * s
+        ry = ux * s + uy * c
+        specs.append(
+            ProjectileSpec(
+                vx=speed * rx,
+                vy=speed * ry,
+                damage=weapon.damage,
+                ttl=weapon.projectile_ttl,
+                pierce=weapon.pierce,
+            )
+        )
+    return tuple(specs)
 
 
 def _make_forward_arc_hits(ctx: FireContext) -> tuple[InstantHitSpec, ...]:

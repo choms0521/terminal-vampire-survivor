@@ -217,3 +217,49 @@ def test_nearest_or_random_tie_order_independent():
         result_rev.projectiles[0].vx,
         result_rev.projectiles[0].vy,
     ), "same seed must hit same target regardless of enemy buffer order"
+
+
+def test_multishot_fans_projectiles_across_the_spread():
+    """A multi-shot weapon fans its shots across spread_angle instead of stacking
+    them on one line: dagger_evolved (count 3, spread 30 deg) fires three darts at
+    distinct angles, the middle one dead-on the target, all at the same speed."""
+    # Target straight along +X so the fan spreads symmetrically in Y.
+    ctx = _ctx(weapon="dagger_evolved", enemies=((0, 5.0, 0.0),), dt=1.0)
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    assert result.fired is True
+    specs = result.projectiles
+    assert len(specs) == 3  # projectile_count darts
+
+    speed = 18.0  # dagger_evolved projectile_speed; only DIRECTION differs per shot
+    for s in specs:
+        assert abs(hypot(s.vx, s.vy) - speed) < 1e-9
+    # The shots fan out: their Y velocities are strictly distinct (not stacked).
+    vys = sorted(s.vy for s in specs)
+    assert vys[0] < vys[1] < vys[2]
+    # Symmetric about the +X aim: middle dart straight, outer two mirror in Y.
+    assert abs(vys[1]) < 1e-9            # middle dart dead-on the target
+    assert abs(vys[0] + vys[2]) < 1e-9   # outer darts mirror in Y
+    assert all(s.vx > 0.0 for s in specs)  # all still travel toward the target
+
+
+def test_zero_spread_stacks_multishot_backward_compatible():
+    """A multi-shot weapon with spread_angle == 0 stacks every shot on the aim line
+    (the pre-fan behavior), so weapon data without a spread is unchanged."""
+    from dataclasses import replace
+
+    defs = make_defs()
+    stacked = replace(defs.weapons["dagger_evolved"], spread_angle=0.0)
+    ctx = FireContext(
+        player_pos=(0.0, 0.0),
+        player_facing=(1.0, 0.0),
+        enemy_positions=((0, 5.0, 0.0),),
+        weapon_def=stacked,
+        attack_speed_mult=1.0,
+        dt=1.0,
+        aspect_x=2.0,
+    )
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    specs = result.projectiles
+    assert len(specs) == 3
+    # Zero spread -> every dart identical (stacked on the aim line).
+    assert all((s.vx, s.vy) == (specs[0].vx, specs[0].vy) for s in specs)

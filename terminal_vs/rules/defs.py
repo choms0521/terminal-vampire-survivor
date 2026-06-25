@@ -64,6 +64,7 @@ class WeaponDef:
     arc_half_width: float = 0.0  # forward_arc cosine half-width (1 = forward only)
     glyph: str = "*"         # render glyph for this weapon's projectile / effect
     color: str = "yellow"    # render color for this weapon's projectile / effect
+    spread_angle: float = 0.0  # total fan angle (deg) across multi-shot; 0 = stacked
 
 
 @dataclass(frozen=True)
@@ -227,6 +228,7 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
             arc_half_width=float(w.get("arc_half_width", 0.0)),
             glyph=str(w.get("glyph", "*")),
             color=str(w.get("color", "yellow")),
+            spread_angle=float(w.get("spread_angle", 0.0)),
         )
         for name, w in weapons_raw.items()
     }
