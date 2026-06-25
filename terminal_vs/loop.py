@@ -52,6 +52,8 @@ _KEY_TO_INTENT = {
 _QUIT_KEYS = ("q", "Q")
 # Key that toggles pause in play mode.
 _PAUSE_KEY = "p"
+# Key that restarts the run from the game-over screen.
+_RESTART_KEY = "r"
 
 
 def _intent_from_key(key) -> Intent | None:
@@ -259,6 +261,16 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
                 accumulator = 0.0
 
         elif mode == _MODE_GAMEOVER:
-            # Painted once on entry; the frozen game-over frame stays until a quit
-            # key (handled at the top of the loop). No further work, no repaint.
-            pass
+            # The frozen game-over frame stays until restart or quit (quit is
+            # handled at the top of the loop). The restart key starts a fresh run
+            # and returns to play: it re-captures the new run's full hp as the
+            # HP-bar denominator and resets the input + clock so the time spent on
+            # the game-over screen is not charged as a catch-up backlog.
+            if str(key) == _RESTART_KEY:
+                sim = new_run(cfg, rng)
+                max_hp = sim.player.hp
+                intent = Intent(0, 0)
+                mode = _MODE_PLAY
+                last = monotonic()
+                accumulator = 0.0
+                render_frame(term, sim, sim.camera, cfg, max_hp, mode)
