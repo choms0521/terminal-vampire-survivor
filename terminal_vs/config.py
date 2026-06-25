@@ -7,22 +7,30 @@ library ``tomllib`` (Python 3.11+, master plan section 5.5):
   * ``config/tuning.toml``  -> operating-point constants (Phase 0 measured):
     sim_tps, poll_timeout, max_catchup, viewport_w/h, entity_cap, aspect_x,
     render_mode.
-  * ``config/balance.toml`` -> game-balance constants (weapon, enemy, xp curve,
-    magnet range).
+  * ``config/balance.toml`` -> game-balance constants (weapons, passives,
+    enemies, evolution, director curve, leveling, magnet range).
 
 Design rules (master plan sections 5.5, 6 / ADR-001):
 
-  * The returned :class:`Config` and its nested :class:`BalanceTable` are frozen
-    dataclasses -- immutable, injected read-only into the rules layer.
+  * The returned :class:`Config` is a frozen dataclass; its ``defs`` field is the
+    immutable :class:`~terminal_vs.rules.defs.BalanceDefs` table built by
+    :func:`terminal_vs.rules.defs.build_defs`. Both are injected read-only into
+    the rules layer.
   * Missing keys (or a missing file) fall back to code defaults so the game runs
     on a first launch without any config file.
-  * Out-of-range values (non-positive rates / sizes) raise a clear ``ValueError``.
+  * Out-of-range values (non-positive rates / sizes) raise a clear ``ValueError``
+    whose message names the offending key and the file it came from.
 
 Operating-point numbers are NOT hardcoded as named constants here: the code
 defaults live in string-keyed ``_*_DEFAULTS`` dicts so the only literal forms in
 this file are dict-key strings (``"sim_tps": ...``), never ``sim_tps = <number>``
 assignments. This keeps the "no hardcoded performance numbers" boundary intact
 while still providing fallbacks.
+
+The balance-side definition dataclasses live in :mod:`terminal_vs.rules.defs`,
+which this module imports (defs.py imports nothing from config, breaking the
+cycle). config.py owns only loading, default-fill, and range validation of the
+balance dict; ``build_defs`` turns the validated dict into the typed tables.
 """
 
 from __future__ import annotations
@@ -30,6 +38,8 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+
+from .rules.defs import STARTING_WEAPON, BalanceDefs, build_defs
 
 # --- Code-default fallbacks (string-keyed; never named perf constants) ---------
 # Each value is reached via a key string, so this file contains no
@@ -46,79 +56,74 @@ _TUNING_DEFAULTS: dict[str, object] = {
     "render_mode": "diff",
 }
 
-# Balance fallbacks, grouped by table section (mirrors config/balance.toml).
+# Balance fallbacks, grouped by table section (mirrors config/balance.toml). A
+# missing section or key falls back to these so the game runs with no file. The
+# values are dict-reached (no ``cooldown = <number>`` named-constant forms) and
+# are balance dials, not performance operating-point numbers.
+_LEVELING_DEFAULTS: dict[str, object] = {
+    "draft_choices": 3,
+    "xp_curve_base": 5.0,
+    "xp_curve_growth": 1.5,
+}
 _WEAPON_DEFAULTS: dict[str, object] = {
-    "cooldown": 0.6,
-    "damage": 10.0,
-    "projectile_speed": 18.0,
+    "max_level": 8,
+    "cooldown": 1.2,
+    "damage": 6.0,
+    "projectile_count": 1,
+    "projectile_speed": 14.0,
     "projectile_ttl": 1.2,
+    "targeting": "nearest",
+    "pierce": 0,
+    "arc_range": 0.0,
+    "arc_half_width": 0.0,
+}
+_PASSIVE_DEFAULTS: dict[str, object] = {
+    "max_level": 5,
+    "multiplier_per_level": 1.0,
 }
 _ENEMY_DEFAULTS: dict[str, object] = {
-    "hp": 20.0,
-    "move_speed": 4.0,
+    "hp": 10.0,
+    "move_speed": 2.5,
     "spawn_weight": 1.0,
+    "glyph": "z",
+    "color": "red",
 }
-_XP_DEFAULTS: dict[str, object] = {
-    "base": 5.0,
-    "growth": 1.5,
+_EVOLUTION_DEFAULTS: dict[str, object] = {
+    "base": "dagger",
+    "requires_passive": "attack_speed",
+    "base_max_level": 8,
+    "result_weapon": "dagger_evolved",
+}
+_DIRECTOR_DEFAULTS: dict[str, object] = {
+    "base_spawn_interval": 2.0,
+    "min_spawn_interval": 0.4,
+    "reinforce_steps": [[0, 1.0, 1]],
 }
 _PICKUP_DEFAULTS: dict[str, object] = {
     "magnet_range": 4.0,
 }
 
+# Default content set, used when balance.toml omits a whole section (so the game
+# still has weapons/passives/enemies/evolutions on a first launch). Each entry is
+# a code default keyed by name; the loader merges any present overrides on top.
+_DEFAULT_WEAPON_NAMES: tuple[str, ...] = ("dagger", "dagger_evolved")
+_DEFAULT_PASSIVE_NAMES: tuple[str, ...] = ("attack_speed",)
+_DEFAULT_ENEMY_NAMES: tuple[str, ...] = ("walker",)
+_DEFAULT_EVOLUTION_NAMES: tuple[str, ...] = ("dagger_x",)
 
-@dataclass(frozen=True)
-class WeaponBalance:
-    """Immutable weapon (dagger) balance constants (from balance.toml)."""
-
-    cooldown: float          # seconds between auto-fire shots
-    damage: float            # damage applied per projectile hit
-    projectile_speed: float  # world units per second
-    projectile_ttl: float    # projectile lifetime in seconds
-
-
-@dataclass(frozen=True)
-class EnemyBalance:
-    """Immutable enemy (single Phase 1 type) balance constants."""
-
-    hp: float            # starting hit points
-    move_speed: float    # world units per second toward the player
-    spawn_weight: float  # relative spawn weight (flat ratio in Phase 1)
-
-
-@dataclass(frozen=True)
-class XpCurve:
-    """Immutable experience-curve parameters.
-
-    The xp required to clear level ``L`` (1-based) is ``base * growth ** (L-1)``.
-    rules/leveling consumes this; the exact formula lives there, not here.
-    """
-
-    base: float    # xp needed to clear level 1
-    growth: float  # geometric multiplier per level
-
-
-@dataclass(frozen=True)
-class BalanceTable:
-    """Immutable container of all game-balance sub-tables (master section 5.5).
-
-    rules/defs.py reads this to build weapon/enemy/xp definitions; the whole
-    table is injected read-only into the rules layer.
-    """
-
-    weapon: WeaponBalance
-    enemy: EnemyBalance
-    xp: XpCurve
-    magnet_range: float  # pickup auto-collect radius in world units
+# Targeting strategies a weapon may declare (validated on load).
+_VALID_TARGETING: frozenset[str] = frozenset(
+    {"nearest", "nearest_or_random", "forward_arc"}
+)
 
 
 @dataclass(frozen=True)
 class Config:
     """Immutable game configuration (master section 6 boundary, frozen side).
 
-    Operating-point fields are loaded from config/tuning.toml by key; nested
-    ``balance`` is built from config/balance.toml. Never construct these numbers
-    inline elsewhere -- read them from a ``Config`` instance.
+    Operating-point fields are loaded from config/tuning.toml by key; ``defs`` is
+    the immutable balance table built from config/balance.toml. Never construct
+    these numbers inline elsewhere -- read them from a ``Config`` instance.
     """
 
     sim_tps: float        # simulation ticks per second
@@ -128,10 +133,8 @@ class Config:
     viewport_h: int       # viewport height in cells
     entity_cap: int       # max simultaneous entities
     aspect_x: float       # horizontal cell aspect compensation factor (section 3.1)
-    render_mode: str      # "full" | "diff" (Phase 1 emits full frames only; the
-                          #   diff renderer is deferred to Phase 2, so this field
-                          #   is loaded/validated but not yet consumed by render)
-    balance: BalanceTable  # game-balance constants from balance.toml
+    render_mode: str      # "full" | "diff"
+    defs: BalanceDefs     # immutable balance tables built from balance.toml
 
 
 def _load_toml(path: str | Path) -> dict:
@@ -161,8 +164,9 @@ def _require_positive(name: str, value: float) -> None:
     """Raise a clear ValueError if a rate/size value is not strictly positive.
 
     The hint points at the right file by the key's shape: balance keys are dotted
-    and sectioned (e.g. ``weapon.cooldown``) while operating-point keys are flat
-    (e.g. ``sim_tps``), so the message names the file the bad value came from.
+    and sectioned (e.g. ``weapons.dagger.cooldown``) while operating-point keys
+    are flat (e.g. ``sim_tps``), so the message names the file the bad value came
+    from.
     """
     if value <= 0:
         source = "config/balance.toml" if "." in name else "config/tuning.toml"
@@ -171,52 +175,281 @@ def _require_positive(name: str, value: float) -> None:
         )
 
 
-def _build_balance(balance_data: dict) -> BalanceTable:
-    """Build the immutable BalanceTable from raw balance.toml data + defaults."""
-    weapon_data = balance_data.get("weapon", {})
-    enemy_data = balance_data.get("enemy", {})
-    xp_data = balance_data.get("xp", {})
-    pickup_data = balance_data.get("pickup", {})
+def _merged_section(raw: dict, name: str, defaults: dict) -> dict:
+    """Return one named entry with code defaults filled in for missing keys.
 
-    weapon = WeaponBalance(
-        cooldown=_f(weapon_data, "cooldown", _WEAPON_DEFAULTS),
-        damage=_f(weapon_data, "damage", _WEAPON_DEFAULTS),
-        projectile_speed=_f(weapon_data, "projectile_speed", _WEAPON_DEFAULTS),
-        projectile_ttl=_f(weapon_data, "projectile_ttl", _WEAPON_DEFAULTS),
-    )
-    enemy = EnemyBalance(
-        hp=_f(enemy_data, "hp", _ENEMY_DEFAULTS),
-        move_speed=_f(enemy_data, "move_speed", _ENEMY_DEFAULTS),
-        spawn_weight=_f(enemy_data, "spawn_weight", _ENEMY_DEFAULTS),
-    )
-    xp = XpCurve(
-        base=_f(xp_data, "base", _XP_DEFAULTS),
-        growth=_f(xp_data, "growth", _XP_DEFAULTS),
-    )
-    magnet_range = _f(pickup_data, "magnet_range", _PICKUP_DEFAULTS)
+    ``raw`` is the section dict (e.g. all ``[weapons.*]`` tables); ``name`` is
+    the entry id. Present keys win; absent keys fall back to ``defaults``. The
+    result is a fresh dict (the input is never mutated).
+    """
+    entry = dict(raw.get(name, {}))
+    merged = dict(defaults)
+    merged.update(entry)
+    return merged
 
-    # Range validation on balance constants (all must be strictly positive: a
-    # zero/negative weapon.damage means enemies never die, and a non-positive
-    # enemy.spawn_weight makes spawn weighting nonsensical).
-    _require_positive("weapon.cooldown", weapon.cooldown)
-    _require_positive("weapon.damage", weapon.damage)
-    _require_positive("weapon.projectile_speed", weapon.projectile_speed)
-    _require_positive("weapon.projectile_ttl", weapon.projectile_ttl)
-    _require_positive("enemy.hp", enemy.hp)
-    _require_positive("enemy.move_speed", enemy.move_speed)
-    _require_positive("enemy.spawn_weight", enemy.spawn_weight)
-    _require_positive("xp.base", xp.base)
-    _require_positive("xp.growth", xp.growth)
+
+def _validate_weapon(name: str, w: dict) -> None:
+    """Range/enum validation for one weapon entry (keys hinted as balance).
+
+    Projectile fields (speed) are only required positive for weapons that
+    actually fire projectiles. A ``forward_arc`` melee weapon carries zero
+    projectile count/speed/ttl by design, so requiring those positive would
+    wrongly reject it; its reach is validated via ``arc_range`` instead.
+    """
+    _require_positive(f"weapons.{name}.max_level", w["max_level"])
+    _require_positive(f"weapons.{name}.cooldown", w["cooldown"])
+    _require_positive(f"weapons.{name}.damage", w["damage"])
+    if w["targeting"] not in _VALID_TARGETING:
+        raise ValueError(
+            f"config: weapons.{name}.targeting must be one of "
+            f"{sorted(_VALID_TARGETING)}, got {w['targeting']!r} "
+            f"(check config/balance.toml)"
+        )
+    if int(w["projectile_count"]) < 0:
+        raise ValueError(
+            f"config: weapons.{name}.projectile_count must be >= 0, got "
+            f"{w['projectile_count']!r} (check config/balance.toml)"
+        )
+    if int(w["pierce"]) < 0:
+        raise ValueError(
+            f"config: weapons.{name}.pierce must be >= 0, got "
+            f"{w['pierce']!r} (check config/balance.toml)"
+        )
+    if w["targeting"] == "forward_arc":
+        # Melee: the arc reach must be positive (it replaces projectile range).
+        _require_positive(f"weapons.{name}.arc_range", w["arc_range"])
+        # arc_half_width is a cosine value so it must be in [-1.0, 1.0].
+        ahw = float(w["arc_half_width"])
+        if not (-1.0 <= ahw <= 1.0):
+            raise ValueError(
+                f"config: weapons.{name}.arc_half_width must be in [-1.0, 1.0], "
+                f"got {ahw!r} (check config/balance.toml)"
+            )
+    else:
+        # Projectile weapons must travel, fire at least one projectile, and give
+        # that projectile a positive lifetime. A count or ttl of 0 on a projectile
+        # weapon would silently produce no effective shots. forward_arc melee is
+        # handled in the branch above and legitimately carries zero projectile
+        # fields, so these strict-positive checks apply only here.
+        _require_positive(
+            f"weapons.{name}.projectile_speed", w["projectile_speed"]
+        )
+        _require_positive(
+            f"weapons.{name}.projectile_count", w["projectile_count"]
+        )
+        _require_positive(
+            f"weapons.{name}.projectile_ttl", w["projectile_ttl"]
+        )
+
+
+def _validate_passive(name: str, p: dict) -> None:
+    """Range validation for one passive entry."""
+    _require_positive(f"passives.{name}.max_level", p["max_level"])
+    _require_positive(f"passives.{name}.multiplier_per_level", p["multiplier_per_level"])
+
+
+def _validate_enemy(name: str, e: dict) -> None:
+    """Range validation for one enemy entry."""
+    _require_positive(f"enemies.{name}.hp", e["hp"])
+    _require_positive(f"enemies.{name}.move_speed", e["move_speed"])
+    _require_positive(f"enemies.{name}.spawn_weight", e["spawn_weight"])
+
+
+def _validate_reinforce_steps(steps) -> None:
+    """Validate the director's per-minute reinforce table row by row.
+
+    Each row must be ``[minute, interval_mult, concurrent]`` with ``minute >= 0``,
+    ``interval_mult > 0``, ``concurrent >= 1``, and the minute thresholds must be
+    non-decreasing (sim/spawn's active-step lookup assumes ascending order). A
+    malformed or out-of-range row would make the director never spawn, spawn zero
+    enemies, or select steps unpredictably, so it is rejected at load time with a
+    message naming the offending row index and config/balance.toml.
+    """
+    prev_minute: float | None = None
+    for idx, row in enumerate(steps):
+        if not isinstance(row, (list, tuple)) or len(row) != 3:
+            raise ValueError(
+                f"config: director.reinforce_steps[{idx}] must be "
+                f"[minute, interval_mult, concurrent], got {row!r} "
+                f"(check config/balance.toml)"
+            )
+        minute, interval_mult, concurrent = row
+        if minute < 0:
+            raise ValueError(
+                f"config: director.reinforce_steps[{idx}].minute must be >= 0, "
+                f"got {minute!r} (check config/balance.toml)"
+            )
+        _require_positive(
+            f"director.reinforce_steps[{idx}].interval_mult", interval_mult
+        )
+        if int(concurrent) < 1:
+            raise ValueError(
+                f"config: director.reinforce_steps[{idx}].concurrent must be "
+                f">= 1, got {concurrent!r} (check config/balance.toml)"
+            )
+        if prev_minute is not None and minute < prev_minute:
+            raise ValueError(
+                f"config: director.reinforce_steps minutes must be "
+                f"non-decreasing, got {minute!r} after {prev_minute!r} at index "
+                f"{idx} (check config/balance.toml)"
+            )
+        prev_minute = minute
+
+
+def _normalized_balance(balance_data: dict) -> dict:
+    """Fill defaults + validate ranges, returning a dict ready for build_defs.
+
+    Each section's entries are merged over code defaults (so a partial entry or a
+    whole missing section still yields a usable table on first launch), then
+    range-validated. The returned dict mirrors the balance.toml schema and is a
+    fresh structure -- ``balance_data`` is never mutated.
+
+    Raises:
+        ValueError: if any balance value is out of range; the message names the
+            offending dotted key and points at config/balance.toml.
+    """
+    leveling_raw = balance_data.get("leveling", {})
+    leveling = {
+        "draft_choices": _i(leveling_raw, "draft_choices", _LEVELING_DEFAULTS),
+        "xp_curve_base": _f(leveling_raw, "xp_curve_base", _LEVELING_DEFAULTS),
+        "xp_curve_growth": _f(leveling_raw, "xp_curve_growth", _LEVELING_DEFAULTS),
+    }
+    _require_positive("leveling.draft_choices", leveling["draft_choices"])
+    _require_positive("leveling.xp_curve_base", leveling["xp_curve_base"])
+    # The xp curve is base * growth ** (level - 1); rules.leveling.xp_for_level
+    # documents it as monotonically increasing, which holds only for growth > 1.0.
+    # A growth of <= 1.0 would make later levels require equal or *less* xp, which
+    # breaks progression and the determinism assumptions in tests/docs.
+    if leveling["xp_curve_growth"] <= 1.0:
+        raise ValueError(
+            f"config: leveling.xp_curve_growth must be > 1.0 (a monotonically "
+            f"increasing xp curve), got {leveling['xp_curve_growth']!r} "
+            f"(check config/balance.toml)"
+        )
+
+    # Sections fall back to a default name set when absent, so the rules layer
+    # always has at least the starting content.
+    weapons_raw = balance_data.get("weapons", {})
+    weapon_names = list(weapons_raw) or list(_DEFAULT_WEAPON_NAMES)
+    weapons = {}
+    for name in weapon_names:
+        w = _merged_section(weapons_raw, name, _WEAPON_DEFAULTS)
+        _validate_weapon(name, w)
+        weapons[name] = w
+
+    # A run begins owning the starting weapon (rules.leveling.BuildState's
+    # default). If the user provided a [weapons.*] section it must define that
+    # weapon -- otherwise the run starts holding a weapon with no WeaponDef, which
+    # never fires and skews the level-up draft pool. When no weapons section is
+    # given the default content set (which includes it) is used, so this only
+    # guards user-authored balance files.
+    if weapons_raw and STARTING_WEAPON not in weapons:
+        raise ValueError(
+            f"config: the starting weapon {STARTING_WEAPON!r} must be defined in "
+            f"[weapons.*] (a run begins owning it); add it or the run starts with "
+            f"a weapon that has no stats (check config/balance.toml)"
+        )
+
+    passives_raw = balance_data.get("passives", {})
+    passive_names = list(passives_raw) or list(_DEFAULT_PASSIVE_NAMES)
+    passives = {}
+    for name in passive_names:
+        p = _merged_section(passives_raw, name, _PASSIVE_DEFAULTS)
+        _validate_passive(name, p)
+        passives[name] = p
+
+    enemies_raw = balance_data.get("enemies", {})
+    enemy_names = list(enemies_raw) or list(_DEFAULT_ENEMY_NAMES)
+    enemies = {}
+    for name in enemy_names:
+        e = _merged_section(enemies_raw, name, _ENEMY_DEFAULTS)
+        _validate_enemy(name, e)
+        enemies[name] = e
+
+    evolution_raw = balance_data.get("evolution", {})
+    # Only inject default evolutions when the ENTIRE balance file is absent (both
+    # weapons and evolution sections missing). If the user specified weapons but
+    # omitted evolutions, we produce an empty evolution table rather than injecting
+    # defaults that may reference weapons the user did not define.
+    _no_user_balance = not weapons_raw and not evolution_raw
+    evolution_names = list(evolution_raw) or (
+        list(_DEFAULT_EVOLUTION_NAMES) if _no_user_balance else []
+    )
+    evolution = {}
+    for name in evolution_names:
+        ev = _merged_section(evolution_raw, name, _EVOLUTION_DEFAULTS)
+        _require_positive(f"evolution.{name}.base_max_level", ev["base_max_level"])
+        evolution[name] = ev
+
+    director_raw = balance_data.get("director", {})
+    director = {
+        "base_spawn_interval": _f(
+            director_raw, "base_spawn_interval", _DIRECTOR_DEFAULTS
+        ),
+        "min_spawn_interval": _f(
+            director_raw, "min_spawn_interval", _DIRECTOR_DEFAULTS
+        ),
+        "reinforce_steps": director_raw.get(
+            "reinforce_steps", _DIRECTOR_DEFAULTS["reinforce_steps"]
+        ),
+    }
+    _require_positive("director.base_spawn_interval", director["base_spawn_interval"])
+    _require_positive("director.min_spawn_interval", director["min_spawn_interval"])
+    if not director["reinforce_steps"]:
+        raise ValueError(
+            "config: director.reinforce_steps must be non-empty "
+            "(check config/balance.toml)"
+        )
+    _validate_reinforce_steps(director["reinforce_steps"])
+
+    pickup_raw = balance_data.get("pickup", {})
+    magnet_range = _f(pickup_raw, "magnet_range", _PICKUP_DEFAULTS)
     _require_positive("pickup.magnet_range", magnet_range)
 
-    return BalanceTable(weapon=weapon, enemy=enemy, xp=xp, magnet_range=magnet_range)
+    # Cross-reference: every evolution's base, result_weapon, and requires_passive
+    # must resolve to real entries in their respective tables.
+    for evo_name, ev in evolution.items():
+        base = ev["base"]
+        if base not in weapons:
+            raise ValueError(
+                f"config: evolution.{evo_name}.base '{base}' does not name a "
+                f"weapon defined in [weapons.*] (check config/balance.toml)"
+            )
+        result = ev["result_weapon"]
+        if result not in weapons:
+            raise ValueError(
+                f"config: evolution.{evo_name}.result_weapon '{result}' does not "
+                f"name a weapon defined in [weapons.*] (check config/balance.toml)"
+            )
+        req_passive = ev["requires_passive"]
+        if req_passive not in passives:
+            raise ValueError(
+                f"config: evolution.{evo_name}.requires_passive '{req_passive}' "
+                f"does not name a passive defined in [passives.*] "
+                f"(check config/balance.toml)"
+            )
+
+    return {
+        "leveling": leveling,
+        "weapons": weapons,
+        "passives": passives,
+        "enemies": enemies,
+        "evolution": evolution,
+        "director": director,
+        "pickup": {"magnet_range": magnet_range},
+    }
+
+
+def _build_defs(balance_data: dict) -> BalanceDefs:
+    """Normalize + validate the raw balance dict, then build the typed tables."""
+    return build_defs(_normalized_balance(balance_data))
 
 
 def load_config(tuning_path: str | Path, balance_path: str | Path) -> Config:
     """Load and validate both TOML files into a frozen :class:`Config`.
 
     Missing keys (or a missing file) fall back to code defaults. Out-of-range
-    operating-point values raise a clear ``ValueError``.
+    operating-point or balance values raise a clear ``ValueError``.
 
     Args:
         tuning_path: path to the operating-point TOML (tuning.toml).
@@ -226,7 +459,8 @@ def load_config(tuning_path: str | Path, balance_path: str | Path) -> Config:
         An immutable :class:`Config`.
 
     Raises:
-        ValueError: if a rate/size value is not strictly positive.
+        ValueError: if a rate/size value is not strictly positive, or a weapon
+            declares an unknown targeting strategy.
     """
     tuning = _load_toml(tuning_path)
     balance_data = _load_toml(balance_path)
@@ -263,7 +497,7 @@ def load_config(tuning_path: str | Path, balance_path: str | Path) -> Config:
         entity_cap=entity_cap,
         aspect_x=aspect_x,
         render_mode=render_mode,
-        balance=_build_balance(balance_data),
+        defs=_build_defs(balance_data),
     )
 
 

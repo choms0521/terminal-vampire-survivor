@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from ..config import Config
 from ..world import Camera, is_visible, world_to_cell
-from .hud import hud_lines
+from .hud import draft_overlay_lines, hud_lines
 
 # Empty floor cell. A single space both reads as "no entity here" and, once rows
 # are padded to the fixed width, erases any ghost glyph left from a prior frame.
@@ -39,10 +39,13 @@ _FLOOR_GLYPH = " "
 # for no visual gain (a space has no foreground glyph to color).
 _FLOOR_COLOR = ""
 
-# Known entity color names (the entity ``.color`` strings from sim.state). The
-# blessed emitter maps these to terminal escapes; an unknown name falls back to
-# the plain glyph so the emitter can never raise on unexpected data.
-_KNOWN_COLORS = ("white", "red", "yellow", "green")
+# Known entity color names (the entity ``.color`` strings from sim.state, plus
+# the enemy colors from balance.toml). The blessed emitter maps these to terminal
+# escapes; an unknown name falls back to the plain glyph so the emitter can never
+# raise on unexpected data. "magenta" is the swarm enemy color, added so the
+# swarm renders colored (Chunk 1 review follow-up); "cyan" is reserved for future
+# enemy/effect colors.
+_KNOWN_COLORS = ("white", "red", "yellow", "green", "magenta", "cyan")
 
 
 def compose_cells(state, cam: Camera, cfg: Config) -> list[list[tuple[str, str]]]:
@@ -99,6 +102,11 @@ def compose_frame(
 
     ``max_hp`` is threaded into the HUD as the HP-bar denominator (captured by the
     loop from the fresh run) so no player-start constant is hardcoded here.
+
+    Level-up draft overlay (master 3.4, 8): when ``state.pending_choices`` is
+    non-empty (the loop has rolled a draft and paused the sim), the numbered cards
+    are drawn centered over the frame so the player can see what to choose. The
+    draft draws over everything except the HUD rows.
     """
     grid = compose_cells(state, cam, cfg)
 
@@ -115,7 +123,40 @@ def compose_frame(
             rendered_rows.append(
                 "".join(colorize(glyph, color) for glyph, color in cells)
             )
+
+    # Draft overlay: drawn only while a level-up choice is pending (the sim is
+    # paused then, so this never competes with live gameplay). getattr keeps the
+    # composer tolerant of test doubles without a pending_choices field.
+    draft = draft_overlay_lines(getattr(state, "pending_choices", ()))
+    if draft:
+        _overlay_draft_centered(rendered_rows, draft, cfg, hud_height=len(overlay))
+
     return "\n".join(rendered_rows)
+
+
+def _overlay_draft_centered(
+    rendered_rows: list[str],
+    draft: list[str],
+    cfg: Config,
+    hud_height: int,
+) -> None:
+    """Overlay the draft card lines centered on the frame, in place.
+
+    Vertically centered but never on top of the ``hud_height`` HUD rows, and
+    horizontally centered. Each line is plain text (no per-glyph color, like the
+    HUD) clipped and padded to the fixed viewport width so it cleanly overwrites
+    the paused gameplay beneath it. Lines that would fall outside the viewport are
+    skipped, so a tall draft never overflows the grid.
+    """
+    width = cfg.viewport_w
+    height = cfg.viewport_h
+    start = max(hud_height, (height - len(draft)) // 2)
+    for offset, line in enumerate(draft):
+        row = start + offset
+        if not (0 <= row < height):
+            continue
+        indent = max(0, (width - len(line)) // 2)
+        rendered_rows[row] = (" " * indent + line)[:width].ljust(width)
 
 
 def _identity_colorize(glyph: str, name: str) -> str:

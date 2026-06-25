@@ -1,18 +1,26 @@
-"""Tests for terminal_vs.loop: the level-up mode transition and drain.
+"""Tests for terminal_vs.loop: the level-up draft selection and drain (Phase 2).
 
 These exercise the loop's level-up handling headlessly with a fake terminal,
 without depending on the player surviving long enough to level up organically
 (survival is balance-gated and is a Phase 3 concern). The loop's ``sim`` test
 seam lets us inject a SimState that already has a pending level-up.
+
+The Phase 2 draft is a SELECTION (number keys 1..N), not a single confirm. The
+loop rolls ``state.pending_choices`` on entering levelup and ``apply_draft_selection``
+applies the chosen card, advances one level (carrying the xp overflow), and
+reconciles the per-weapon cooldowns; the headless ``_drain_levelups`` auto-picks
+index 0 per banked level via that same helper.
 """
 
 from __future__ import annotations
 
 import random
 
-from terminal_vs.loop import _drain_levelups, run
-from terminal_vs.rules.leveling import xp_to_clear
-from terminal_vs.sim.state import LevelState, new_run
+from dataclasses import replace
+
+from terminal_vs.loop import _drain_levelups, apply_draft_selection, run
+from terminal_vs.rules.leveling import xp_for_level
+from terminal_vs.sim.state import new_run
 
 from .conftest import make_config
 
@@ -50,18 +58,24 @@ class _FakeTerm:
         return _FakeKey("q")
 
 
+def _prime_pending(state, cfg, level: int, xp: float) -> None:
+    """Set the build's level/xp and flag a pending level-up (as step would)."""
+    state.build = replace(state.build, level=level, xp=xp)
+    state.level_up_pending = True
+
+
 def test_drain_levelups_consumes_one_level():
     cfg = make_config()
     rng = random.Random(0)
     state = new_run(cfg, rng)
     # Exactly enough xp to clear level 1, flagged pending (as step would).
-    state.level_state = LevelState(level=1, xp=xp_to_clear(1, cfg))
-    state.level_up_pending = True
+    _prime_pending(state, cfg, level=1, xp=xp_for_level(1, cfg.defs))
 
     _drain_levelups(state, cfg, rng)
 
-    assert state.level_state.level == 2
+    assert state.build.level == 2
     assert state.level_up_pending is False
+    assert state.pending_choices == ()
 
 
 def test_drain_levelups_consumes_multiple_banked_levels():
@@ -69,33 +83,57 @@ def test_drain_levelups_consumes_multiple_banked_levels():
     rng = random.Random(0)
     state = new_run(cfg, rng)
     # Bank enough xp to clear BOTH level 1 and level 2 in one drain.
-    banked = xp_to_clear(1, cfg) + xp_to_clear(2, cfg)
-    state.level_state = LevelState(level=1, xp=banked)
-    state.level_up_pending = True
+    banked = xp_for_level(1, cfg.defs) + xp_for_level(2, cfg.defs)
+    _prime_pending(state, cfg, level=1, xp=banked)
 
     _drain_levelups(state, cfg, rng)
 
     # Two thresholds cleared -> level 3, and the flag is cleared.
-    assert state.level_state.level == 3
+    assert state.build.level == 3
+    assert state.level_up_pending is False
+    assert state.pending_choices == ()
+
+
+def test_apply_draft_selection_reconciles_cooldowns():
+    """Selecting a new-weapon card adds the weapon and a fresh 0.0 cooldown."""
+    cfg = make_config()
+    rng = random.Random(0)
+    state = new_run(cfg, rng)
+    _prime_pending(state, cfg, level=1, xp=xp_for_level(1, cfg.defs))
+    # Force a deterministic, known choice: a new magic_bolt weapon card.
+    from terminal_vs.rules.leveling import KIND_NEW_WEAPON, Choice
+
+    state.pending_choices = (
+        Choice(kind=KIND_NEW_WEAPON, label="New: magic_bolt", target="magic_bolt"),
+    )
+
+    apply_draft_selection(state, 0, cfg, rng)
+
+    weapon_names = {name for name, _ in state.build.weapon_levels}
+    assert "magic_bolt" in weapon_names
+    # The cooldown dict was reconciled to the new weapon set.
+    assert "magic_bolt" in state.weapon_cooldowns
+    assert state.weapon_cooldowns["magic_bolt"] == 0.0
+    assert state.build.level == 2
     assert state.level_up_pending is False
 
 
-def test_levelup_overlay_confirm_returns_to_play():
-    """play -> (pending) -> levelup overlay -> confirm drains -> back to play.
+def test_levelup_overlay_select_returns_to_play():
+    """play -> (pending) -> levelup overlay -> select -> back to play.
 
     Drive run() with an injected primed sim: a neutral poll trips the level-up
-    mode, a confirm key drains it, and a quit key exits. The observable result is
-    that the injected sim advanced a level and the pending flag was cleared by the
-    loop (step never clears it).
+    mode (rolling the draft), a number key selects card 1, and a quit key exits.
+    The observable result is that the injected sim advanced a level and the
+    pending flag was cleared by the loop (step never clears it).
     """
     cfg = make_config()
     rng = random.Random(0)
     sim = new_run(cfg, rng)
-    sim.level_state = LevelState(level=1, xp=xp_to_clear(1, cfg))
-    sim.level_up_pending = True
+    _prime_pending(sim, cfg, level=1, xp=xp_for_level(1, cfg.defs))
 
-    term = _FakeTerm([_FakeKey(""), _FakeKey(" "), _FakeKey("q")])
+    term = _FakeTerm([_FakeKey(""), _FakeKey("1"), _FakeKey("q")])
     run(term, cfg, rng, sim=sim)
 
-    assert sim.level_state.level >= 2
+    assert sim.build.level >= 2
     assert sim.level_up_pending is False
+    assert sim.pending_choices == ()

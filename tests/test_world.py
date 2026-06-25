@@ -8,13 +8,7 @@ round-based quantization exact.
 
 from __future__ import annotations
 
-from terminal_vs.config import (
-    BalanceTable,
-    Config,
-    EnemyBalance,
-    WeaponBalance,
-    XpCurve,
-)
+from terminal_vs.config import Config
 from terminal_vs.world import (
     Camera,
     cell_to_world,
@@ -24,25 +18,13 @@ from terminal_vs.world import (
     world_to_cell,
 )
 
+from .conftest import make_config
+
 
 def _cfg(aspect_x: float = 2.0, viewport_w: int = 100, viewport_h: int = 30) -> Config:
-    """Build a Config directly for world tests (no TOML needed)."""
-    balance = BalanceTable(
-        weapon=WeaponBalance(cooldown=0.6, damage=10.0, projectile_speed=18.0, projectile_ttl=1.2),
-        enemy=EnemyBalance(hp=20.0, move_speed=4.0, spawn_weight=1.0),
-        xp=XpCurve(base=5.0, growth=1.5),
-        magnet_range=4.0,
-    )
-    return Config(
-        sim_tps=20.0,
-        poll_timeout=0.005,
-        max_catchup=5,
-        viewport_w=viewport_w,
-        viewport_h=viewport_h,
-        entity_cap=200,
-        aspect_x=aspect_x,
-        render_mode="full",
-        balance=balance,
+    """Build a Config for world tests (only the operating point matters here)."""
+    return make_config(
+        aspect_x=aspect_x, viewport_w=viewport_w, viewport_h=viewport_h
     )
 
 

@@ -1,79 +1,132 @@
-"""Tests for terminal_vs.rules.leveling: xp accrual, threshold, draft, immutability."""
+"""Tests for terminal_vs.rules.leveling: xp curve, draft, apply, passive stats."""
 
 from __future__ import annotations
 
+import copy
 import random
 
 from terminal_vs.rules.leveling import (
+    BuildState,
     Choice,
     accrue_xp,
     apply_choice,
+    effective_stats,
     level_up_pending,
     roll_choices,
-    xp_to_clear,
+    xp_for_level,
 )
-from terminal_vs.sim.state import LevelState
 
-from .conftest import make_config
-
-
-def test_level_up_pending_below_threshold_false():
-    cfg = make_config(xp_base=5.0, xp_growth=1.5)
-    # Level 1 threshold = 5.0; xp 4.0 is below it.
-    ls = LevelState(level=1, xp=4.0)
-    assert level_up_pending(ls, cfg) is False
+from .conftest import make_defs
 
 
-def test_level_up_pending_at_threshold_true():
-    cfg = make_config(xp_base=5.0, xp_growth=1.5)
-    # Exactly at the threshold counts as pending.
-    ls = LevelState(level=1, xp=5.0)
-    assert level_up_pending(ls, cfg) is True
+def test_xp_curve_monotonic():
+    """xp_for_level is strictly increasing in level (growth > 1)."""
+    defs = make_defs()
+    for n in range(1, 20):
+        assert xp_for_level(n + 1, defs) > xp_for_level(n, defs)
+    # Anchored values: base * growth ** (L - 1).
+    assert xp_for_level(1, defs) == 5.0
+    assert abs(xp_for_level(2, defs) - 5.0 * 1.5) < 1e-9
 
 
-def test_level_up_pending_over_threshold_true():
-    cfg = make_config(xp_base=5.0, xp_growth=1.5)
-    ls = LevelState(level=1, xp=12.0)
-    assert level_up_pending(ls, cfg) is True
+def test_level_up_pending_threshold():
+    """level_up_pending is True at/above the current level threshold."""
+    defs = make_defs()
+    assert level_up_pending(BuildState(xp=4.0), defs) is False
+    assert level_up_pending(BuildState(xp=5.0), defs) is True
+    assert level_up_pending(BuildState(xp=12.0), defs) is True
 
 
-def test_xp_to_clear_curve():
-    cfg = make_config(xp_base=5.0, xp_growth=1.5)
-    assert xp_to_clear(1, cfg) == 5.0
-    assert xp_to_clear(2, cfg) == 5.0 * 1.5
-    assert xp_to_clear(3, cfg) == 5.0 * 1.5 * 1.5
-
-
-def test_accrue_xp_returns_new_state_and_does_not_mutate_input():
-    ls = LevelState(level=1, xp=2.0)
-    out = accrue_xp(ls, 3.0)
-    # Input object is unchanged (immutability assertion).
-    assert ls.level == 1
-    assert ls.xp == 2.0
-    # A new state is returned with the accumulated xp.
-    assert out is not ls
+def test_accrue_xp_returns_new_state_immutably():
+    """accrue_xp returns a new state and never mutates its input."""
+    build = BuildState(xp=2.0)
+    out = accrue_xp(build, 3.0)
+    assert out is not build
     assert out.xp == 5.0
-    assert out.level == 1
+    assert build.xp == 2.0  # input unchanged
 
 
-def test_roll_choices_returns_exactly_one():
-    cfg = make_config()
-    rng = random.Random(123)
-    ls = LevelState(level=1, xp=10.0)
-    choices = roll_choices(ls, cfg, rng, n=1)
-    assert len(choices) == 1
-    assert isinstance(choices[0], Choice)
+def test_roll_choices_deterministic():
+    """Same seed + same build yields the same draft tuple (kind, target, label)."""
+    defs = make_defs()
+    build = BuildState(weapon_levels=(("dagger", 1),), passive_levels=(), level=1)
+
+    def run() -> tuple[tuple[str, str, str], ...]:
+        choices = roll_choices(build, defs, random.Random(777), n=3)
+        return tuple((c.kind, c.target, c.label) for c in choices)
+
+    assert run() == run()
+    # The draft honors n.
+    assert len(roll_choices(build, defs, random.Random(1), n=3)) == 3
 
 
-def test_apply_choice_increments_level_and_carries_overflow():
-    cfg = make_config(xp_base=5.0, xp_growth=1.5)
-    rng = random.Random(0)
-    ls = LevelState(level=1, xp=7.0)  # 2.0 over the level-1 threshold of 5.0
-    (choice,) = roll_choices(ls, cfg, rng)
-    out = apply_choice(ls, choice, cfg)
-    # Level incremented, overflow xp carried into the next level.
-    assert out.level == 2
-    assert abs(out.xp - 2.0) < 1e-9
-    # Input unchanged (pure).
-    assert ls.level == 1
-    assert ls.xp == 7.0
+def test_maxed_weapon_excluded():
+    """A maxed weapon never appears as a weapon-upgrade card in the draft."""
+    defs = make_defs()
+    # dagger at its max level (8); no other weapons owned, no passives.
+    build = BuildState(weapon_levels=(("dagger", 8),), passive_levels=())
+    # Roll the entire pool (large n) and confirm no dagger upgrade card.
+    choices = roll_choices(build, defs, random.Random(5), n=50)
+    dagger_upgrades = [
+        c for c in choices if c.kind == "weapon_upgrade" and c.target == "dagger"
+    ]
+    assert dagger_upgrades == []
+
+
+def test_apply_choice_weapon_upgrade_returns_new_state():
+    """apply_choice returns a NEW build with the weapon bumped; input immutable."""
+    build = BuildState(weapon_levels=(("dagger", 1),), passive_levels=())
+    build_before = copy.deepcopy(build)
+    choice = Choice(kind="weapon_upgrade", label="dagger Lv2", target="dagger")
+    out = apply_choice(build, choice)
+    assert out is not build
+    assert dict(out.weapon_levels)["dagger"] == 2
+    # Input unchanged (deepcopy compare).
+    assert build == build_before
+
+
+def test_apply_choice_new_weapon_adds_it():
+    """A new-weapon card adds the weapon at level 1 without touching others."""
+    build = BuildState(weapon_levels=(("dagger", 3),), passive_levels=())
+    choice = Choice(kind="new_weapon", label="New: magic_bolt", target="magic_bolt")
+    out = apply_choice(build, choice)
+    weapons = dict(out.weapon_levels)
+    assert weapons["dagger"] == 3
+    assert weapons["magic_bolt"] == 1
+
+
+def test_apply_choice_passive_adds_level():
+    """A passive card adds/bumps the passive level."""
+    build = BuildState(weapon_levels=(("dagger", 1),), passive_levels=())
+    choice = Choice(kind="passive", label="attack_speed Lv1", target="attack_speed")
+    out = apply_choice(build, choice)
+    assert dict(out.passive_levels)["attack_speed"] == 1
+
+
+def test_passive_multiplies_stats():
+    """effective_stats multiplies the mapped stat by the passive's per-level factor."""
+    defs = make_defs()
+    # No passives -> identity stats.
+    base = effective_stats(BuildState(), defs)
+    assert base.attack_speed_mult == 1.0
+    assert base.move_speed_mult == 1.0
+    assert base.magnet_mult == 1.0
+
+    # One level of attack_speed (multiplier_per_level=0.92) scales attack speed.
+    one = effective_stats(
+        BuildState(passive_levels=(("attack_speed", 1),)), defs
+    )
+    assert abs(one.attack_speed_mult - 0.92) < 1e-9
+    assert one.move_speed_mult == 1.0
+
+    # Two levels compound multiplicatively (0.92 ** 2).
+    two = effective_stats(
+        BuildState(passive_levels=(("attack_speed", 2),)), defs
+    )
+    assert abs(two.attack_speed_mult - 0.92 ** 2) < 1e-9
+
+    # move_speed (1.08) and magnet (1.25) map to their own fields.
+    mv = effective_stats(BuildState(passive_levels=(("move_speed", 1),)), defs)
+    assert abs(mv.move_speed_mult - 1.08) < 1e-9
+    mg = effective_stats(BuildState(passive_levels=(("magnet", 1),)), defs)
+    assert abs(mg.magnet_mult - 1.25) < 1e-9

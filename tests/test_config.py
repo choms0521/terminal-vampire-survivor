@@ -1,6 +1,8 @@
-"""Tests for terminal_vs.config: valid load, default fallback, range validation.
+"""Tests for terminal_vs.config: operating-point load, fallback, range validation.
 
 Uses tmp_path-written TOML files so the repo's real config is never mutated.
+Balance-side coverage (cfg.defs / the balance.toml schema) lives in
+tests/test_config_balance.py; this file covers the tuning.toml operating point.
 """
 
 from __future__ import annotations
@@ -9,13 +11,61 @@ import textwrap
 
 import pytest
 
-from terminal_vs.config import BalanceTable, Config, load_config
+from terminal_vs.config import Config, load_config
 
+# A minimal valid balance.toml shared by the tuning-focused tests below. The
+# balance schema itself is exercised in test_config_balance.py; here it just
+# needs to be valid so load_config succeeds and we can assert the tuning side.
+VALID_BALANCE = """\
+    [leveling]
+    draft_choices   = 3
+    xp_curve_base   = 6.0
+    xp_curve_growth = 1.4
 
-def _write(path, text: str) -> str:
-    path.write_text(textwrap.dedent(text), encoding="utf-8")
-    return str(path)
+    [weapons.dagger]
+    max_level        = 8
+    cooldown         = 1.2
+    damage           = 6.0
+    projectile_count = 1
+    projectile_speed = 14.0
+    projectile_ttl   = 1.2
+    targeting        = "nearest"
 
+    [passives.attack_speed]
+    max_level            = 5
+    multiplier_per_level = 0.92
+
+    [enemies.walker]
+    hp           = 10.0
+    move_speed   = 2.5
+    spawn_weight = 70.0
+    glyph        = "z"
+    color        = "red"
+
+    [weapons.dagger_evolved]
+    max_level        = 1
+    cooldown         = 0.6
+    damage           = 10.0
+    projectile_count = 3
+    projectile_speed = 18.0
+    projectile_ttl   = 1.2
+    targeting        = "nearest"
+    pierce           = 4
+
+    [evolution.dagger_x]
+    base             = "dagger"
+    requires_passive = "attack_speed"
+    base_max_level   = 8
+    result_weapon    = "dagger_evolved"
+
+    [director]
+    base_spawn_interval = 2.0
+    min_spawn_interval  = 0.4
+    reinforce_steps = [[0, 1.0, 1]]
+
+    [pickup]
+    magnet_range = 5.0
+"""
 
 VALID_TUNING = """\
     sim_tps      = 25
@@ -28,29 +78,14 @@ VALID_TUNING = """\
     aspect_x     = 2
 """
 
-VALID_BALANCE = """\
-    [weapon]
-    cooldown         = 0.5
-    damage           = 12.0
-    projectile_speed = 20.0
-    projectile_ttl   = 1.5
 
-    [enemy]
-    hp           = 25.0
-    move_speed   = 3.5
-    spawn_weight = 2.0
-
-    [xp]
-    base   = 6.0
-    growth = 1.4
-
-    [pickup]
-    magnet_range = 5.0
-"""
+def _write(path, text: str) -> str:
+    path.write_text(textwrap.dedent(text), encoding="utf-8")
+    return str(path)
 
 
 def test_valid_load_returns_config_with_expected_fields(tmp_path):
-    """A valid pair of TOMLs loads into a Config with values read by key."""
+    """A valid pair of TOMLs loads into a Config with operating-point values."""
     tuning = _write(tmp_path / "tuning.toml", VALID_TUNING)
     balance = _write(tmp_path / "balance.toml", VALID_BALANCE)
 
@@ -67,17 +102,12 @@ def test_valid_load_returns_config_with_expected_fields(tmp_path):
     assert cfg.max_catchup == 4
     assert cfg.aspect_x == 2.0
     assert cfg.render_mode == "full"
-    # Nested balance table loaded from balance.toml.
-    assert isinstance(cfg.balance, BalanceTable)
-    assert cfg.balance.weapon.cooldown == 0.5
-    assert cfg.balance.weapon.damage == 12.0
-    assert cfg.balance.enemy.hp == 25.0
-    assert cfg.balance.xp.base == 6.0
-    assert cfg.balance.magnet_range == 5.0
+    # The balance side is present as the immutable defs table.
+    assert cfg.defs.weapons["dagger"].cooldown == 1.2
 
 
 def test_config_is_frozen_immutable(tmp_path):
-    """Config and its nested balance are frozen (section 6 boundary)."""
+    """Config is frozen (section 6 boundary)."""
     tuning = _write(tmp_path / "tuning.toml", VALID_TUNING)
     balance = _write(tmp_path / "balance.toml", VALID_BALANCE)
     cfg = load_config(tuning, balance)
@@ -85,7 +115,7 @@ def test_config_is_frozen_immutable(tmp_path):
     with pytest.raises(Exception):
         cfg.sim_tps = 99.0  # type: ignore[misc]
     with pytest.raises(Exception):
-        cfg.balance.weapon.damage = 1.0  # type: ignore[misc]
+        cfg.defs = None  # type: ignore[misc]
 
 
 def test_missing_key_falls_back_to_default(tmp_path):
@@ -112,32 +142,12 @@ def test_missing_key_falls_back_to_default(tmp_path):
     assert cfg.render_mode  # default render_mode string present
 
 
-def test_missing_balance_section_falls_back_to_default(tmp_path):
-    """A balance file missing a whole section uses code defaults for it."""
-    tuning = _write(tmp_path / "tuning.toml", VALID_TUNING)
-    # Only the weapon section; enemy/xp/pickup omitted.
-    partial_balance = """\
-        [weapon]
-        cooldown = 0.4
-    """
-    balance = _write(tmp_path / "balance.toml", partial_balance)
-
-    cfg = load_config(tuning, balance)
-
-    assert cfg.balance.weapon.cooldown == 0.4
-    # Omitted weapon keys + whole sections fall back to positive defaults.
-    assert cfg.balance.weapon.damage > 0
-    assert cfg.balance.enemy.hp > 0
-    assert cfg.balance.xp.base > 0
-    assert cfg.balance.magnet_range > 0
-
-
 def test_missing_files_use_all_defaults(tmp_path):
     """Absent config files do not error -- all defaults are used (first launch)."""
     cfg = load_config(tmp_path / "absent_tuning.toml", tmp_path / "absent_balance.toml")
     assert isinstance(cfg, Config)
     assert cfg.sim_tps > 0
-    assert cfg.balance.weapon.cooldown > 0
+    assert cfg.defs.weapons  # default weapon content present
 
 
 @pytest.mark.parametrize(
@@ -168,35 +178,6 @@ def test_out_of_range_value_raises_valueerror(tmp_path, bad_line):
         load_config(tuning, balance)
     # The hint points at the operating-point file for a tuning value.
     assert "config/tuning.toml" in str(exc.value)
-
-
-def test_out_of_range_balance_raises_valueerror(tmp_path):
-    """A non-positive balance value raises a clear ValueError naming balance.toml."""
-    tuning = _write(tmp_path / "tuning.toml", VALID_TUNING)
-    bad_balance = VALID_BALANCE.replace("hp           = 25.0", "hp           = 0")
-    balance = _write(tmp_path / "balance.toml", bad_balance)
-
-    with pytest.raises(ValueError) as exc:
-        load_config(tuning, balance)
-    # The hint must name the balance file (not tuning) for a balance value.
-    assert "config/balance.toml" in str(exc.value)
-
-
-@pytest.mark.parametrize(
-    "old, new",
-    [
-        ("= 12.0", "= 0"),                       # weapon.damage -> 0
-        ("spawn_weight = 2.0", "spawn_weight = 0"),  # enemy.spawn_weight -> 0
-        ("spawn_weight = 2.0", "spawn_weight = -1"),  # enemy.spawn_weight -> negative
-    ],
-)
-def test_nonpositive_balance_field_raises(tmp_path, old, new):
-    """weapon.damage and enemy.spawn_weight must be strictly positive."""
-    assert old in VALID_BALANCE  # guard: the mutated line actually exists
-    tuning = _write(tmp_path / "tuning.toml", VALID_TUNING)
-    balance = _write(tmp_path / "balance.toml", VALID_BALANCE.replace(old, new))
-    with pytest.raises(ValueError):
-        load_config(tuning, balance)
 
 
 def test_invalid_render_mode_raises_valueerror(tmp_path):
