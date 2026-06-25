@@ -8,7 +8,7 @@ a :class:`WeaponFireResult` value -- the projectiles or instant hits to spawn an
 the updated cooldown. It never mutates its inputs and never touches buffers; the
 sim layer (Chunk 2) applies the result in place.
 
-Three targeting strategies (selected by ``weapon_def.targeting``):
+Four targeting strategies (selected by ``weapon_def.targeting``):
 
   * ``"nearest"``            - one projectile salvo aimed at the nearest enemy.
   * ``"nearest_or_random"``  - aim at the nearest enemy; distance ties are broken
@@ -16,6 +16,9 @@ Three targeting strategies (selected by ``weapon_def.targeting``):
                                (deterministic for a fixed seed).
   * ``"forward_arc"``        - melee: instant hits on every enemy inside a forward
                                arc in front of the player's facing direction.
+  * ``"radial"``             - a 360-degree burst around the player (crowd-clear
+                               nova), independent of any target; fires only when
+                               at least one enemy is present.
 
 Determinism: aspect distance uses :func:`terminal_vs.world.sq_dist_aspect_x` (the
 single on-screen-distance definition) with ``ctx.aspect_x``, and the "nearest"
@@ -26,7 +29,7 @@ blessed, no global state, no Chinese characters.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import acos, cos, hypot, radians, sin
+from math import acos, cos, hypot, pi, radians, sin
 from random import Random
 
 from ..world import sq_dist_aspect_x
@@ -215,6 +218,35 @@ def _make_projectiles(
     return tuple(specs)
 
 
+def _make_radial(ctx: FireContext) -> tuple[ProjectileSpec, ...]:
+    """Build a 360-degree burst centered on the player (a crowd-clear nova).
+
+    Independent of any target: ``projectile_count`` shots are spaced evenly at
+    ``i * 2*pi / count`` from a fixed base angle (0), so the burst is symmetric
+    and trivially reproducible (no rng, no facing). This is a SEPARATE function
+    from the fan ``_make_projectiles`` on purpose: the fan formula
+    ``-spread/2 + spread*i/(count-1)`` would double-cover at a full 360 deg (the
+    first and last shot coincide), whereas ``i * 2*pi / count`` tiles the circle
+    exactly once. The weapon's ``pierce`` is honored on every shot.
+    """
+    weapon = ctx.weapon_def
+    speed = weapon.projectile_speed
+    count = max(1, weapon.projectile_count)
+    specs: list[ProjectileSpec] = []
+    for i in range(count):
+        angle = i * (2.0 * pi / count)
+        specs.append(
+            ProjectileSpec(
+                vx=speed * cos(angle),
+                vy=speed * sin(angle),
+                damage=weapon.damage,
+                ttl=weapon.projectile_ttl,
+                pierce=weapon.pierce,
+            )
+        )
+    return tuple(specs)
+
+
 def _make_forward_arc_hits(ctx: FireContext) -> tuple[InstantHitSpec, ...]:
     """Return instant hits on enemies inside the forward arc (melee swing).
 
@@ -332,6 +364,15 @@ def tick_weapon(
             new_cooldown=reset,
             instant_hits=hits,
             effects=_make_swing_effects(ctx),
+        )
+
+    if ctx.weapon_def.targeting == "radial":
+        # Crowd-clear nova: a 360-deg burst, fired only when there is something to
+        # clear (no enemies -> stay ready/idle, mirroring the empty-target path).
+        if not ctx.enemy_positions:
+            return WeaponFireResult(fired=False, new_cooldown=_READY_IDLE_COOLDOWN)
+        return WeaponFireResult(
+            fired=True, new_cooldown=reset, projectiles=_make_radial(ctx)
         )
 
     target = _select_target(ctx, rng)

@@ -102,6 +102,31 @@ def make_defs(
                 color="yellow",
                 spread_angle=30.0,
             ),
+            "lance": WeaponDef(
+                name="lance",
+                max_level=8,
+                cooldown=1.5,
+                damage=14.0,
+                projectile_count=1,
+                projectile_speed=26.0,
+                projectile_ttl=1.6,
+                targeting="nearest",
+                pierce=99,
+                glyph="=",
+                color="green",
+            ),
+            "nova": WeaponDef(
+                name="nova",
+                max_level=8,
+                cooldown=2.2,
+                damage=7.0,
+                projectile_count=8,
+                projectile_speed=9.0,
+                projectile_ttl=1.0,
+                targeting="radial",
+                glyph="o",
+                color="magenta",
+            ),
         }
     if passives is None:
         passives = {

@@ -221,3 +221,5 @@ def test_shipped_config_loads_and_validates():
     assert weapons["magic_bolt"].color == "cyan"
     assert weapons["dagger_evolved"].spread_angle == 30.0  # the 3-dart fan cone
     assert weapons["swing"].effect_ttl == 0.15  # the swing-visual lifetime
+    assert weapons["lance"].pierce == 99  # lance pierces a whole line
+    assert weapons["nova"].targeting == "radial"  # nova is the 360-deg burst

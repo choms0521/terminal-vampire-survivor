@@ -113,7 +113,7 @@ _DEFAULT_EVOLUTION_NAMES: tuple[str, ...] = ("dagger_x",)
 
 # Targeting strategies a weapon may declare (validated on load).
 _VALID_TARGETING: frozenset[str] = frozenset(
-    {"nearest", "nearest_or_random", "forward_arc"}
+    {"nearest", "nearest_or_random", "forward_arc", "radial"}
 )
 
 

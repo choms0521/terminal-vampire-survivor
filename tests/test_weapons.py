@@ -288,3 +288,35 @@ def test_projectile_weapons_return_no_visual_effects():
     result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
     assert result.fired is True
     assert result.effects == ()
+
+
+def test_radial_nova_fires_evenly_around_the_player():
+    """A radial (nova) weapon fires projectile_count shots tiling the full circle
+    once, independent of any target's bearing, all at the weapon's speed."""
+    from math import atan2, isclose, pi
+
+    # The enemy's position is irrelevant to a radial burst (it fires a full ring).
+    ctx = _ctx(weapon="nova", enemies=((0, 3.0, 0.0),), dt=1.0)
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    assert result.fired is True
+    specs = result.projectiles
+    assert len(specs) == 8  # projectile_count
+
+    speed = 9.0  # nova projectile_speed; only the bearing differs per shot
+    for s in specs:
+        assert isclose(hypot(s.vx, s.vy), speed, rel_tol=1e-9)
+    # Bearings tile the circle exactly once: i * 2*pi/8 from base angle 0.
+    angles = sorted(atan2(s.vy, s.vx) % (2 * pi) for s in specs)
+    expected = sorted((i * 2 * pi / 8) % (2 * pi) for i in range(8))
+    for got, want in zip(angles, expected):
+        assert isclose(got, want, abs_tol=1e-9)
+
+
+def test_radial_nova_stays_idle_with_no_enemies():
+    """A radial weapon stays ready/idle when no enemy is present (it fires only to
+    clear a crowd), so it does not waste a burst into an empty field."""
+    ctx = _ctx(weapon="nova", enemies=(), dt=1.0)
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    assert result.fired is False
+    assert result.new_cooldown == 0.0  # ready to retry next tick
+    assert result.projectiles == ()
