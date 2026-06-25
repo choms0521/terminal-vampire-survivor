@@ -240,6 +240,17 @@ def _validate_weapon(name: str, w: dict) -> None:
             f"weapons.{name}.projectile_count", w["projectile_count"]
         )
         _require_positive(f"weapons.{name}.projectile_ttl", w["projectile_ttl"])
+        # Load-bearing coupling: an orbit ring is ttl-bounded and respawned each
+        # cooldown, and that respawn is what restores the per-life hit_ids re-hit
+        # cadence (see rules/weapons._make_orbit). A ttl >= cooldown lets rings
+        # stack and silently inflates damage, so require ttl < cooldown -- the same
+        # load-time enforcement this config applies to other balance couplings.
+        if float(w["projectile_ttl"]) >= float(w["cooldown"]):
+            raise ValueError(
+                f"config: weapons.{name}.projectile_ttl ({w['projectile_ttl']}) must "
+                f"be < cooldown ({w['cooldown']}) for an orbit weapon, so the ring "
+                f"respawns each cooldown (check config/balance.toml)"
+            )
     else:
         # Projectile weapons must travel, fire at least one projectile, and give
         # that projectile a positive lifetime. A count or ttl of 0 on a projectile

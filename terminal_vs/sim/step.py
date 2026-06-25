@@ -233,9 +233,10 @@ def _fire_weapons(
         if not result.fired:
             continue
         for spec in result.projectiles:
-            # Orbit shots spawn ON the ring (player + r*(cos,sin) at the spec's
-            # angle) so there is no one-frame center-glyph artifact; straight shots
-            # spawn at the player.
+            # Orbit shots spawn on the ring (player + r*(cos,sin) at the spec's
+            # angle); straight shots spawn at the player. For orbit this initial
+            # position is recomputed from orbit_angle by _advance_projectiles the
+            # same tick, so it is just a clear starting value, not load-bearing.
             if spec.orbit_radius > 0.0:
                 spawn_x = player.x + spec.orbit_radius * cos(spec.orbit_angle)
                 spawn_y = player.y + spec.orbit_radius * sin(spec.orbit_angle)
