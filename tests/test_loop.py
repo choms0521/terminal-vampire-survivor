@@ -159,10 +159,15 @@ def test_gameover_restart_repaints_a_fresh_play_frame(capsys):
     term.home = "<F>"  # frame separator so the captured frames can be split
     run(term, cfg, rng, sim=sim)
 
+    # Derive the expected full-HP token from a reference fresh run instead of
+    # hardcoding "100/100", so the assertion follows the start HP / HUD format.
+    full_hp = new_run(cfg, random.Random(0)).player.hp
+    full_hp_token = f"{full_hp:.0f}/{full_hp:.0f}"
+
     frames = [f for f in capsys.readouterr().out.split("<F>") if f.strip()]
     assert any("GAME OVER" in f for f in frames)  # the game-over overlay was shown
     assert "GAME OVER" not in frames[-1]          # ended on a play frame (restarted)
-    assert "100/100" in frames[-1]                # fresh full hp after the restart
+    assert full_hp_token in frames[-1]            # fresh full hp after the restart
 
 
 def test_pause_resume_repaints_a_play_frame(capsys):

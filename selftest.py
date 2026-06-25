@@ -17,16 +17,22 @@ interactive loop are deliberately excluded from headless coverage measurement
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 
 
 def main() -> int:
     """Run the full suite with the coverage gate; return pytest's exit code."""
+    # Resolve the tests directory relative to THIS file, not the current working
+    # directory, so the self-test works when invoked from anywhere (CI wrappers,
+    # tooling, a different cwd) -- not only from the repo root. The --cov targets
+    # are import names, already cwd-independent.
+    tests_dir = str(Path(__file__).resolve().parent / "tests")
     return int(
         pytest.main(
             [
-                "tests/",
+                tests_dir,
                 "--cov=terminal_vs.rules",
                 "--cov=terminal_vs.config",
                 "--cov-fail-under=80",

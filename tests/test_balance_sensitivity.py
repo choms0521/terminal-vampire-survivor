@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import random
 
+from terminal_vs.config import Config
 from terminal_vs.rules.defs import DirectorDef, EnemyDef, ReinforceStep
 
 from .conftest import make_config, make_defs
@@ -30,7 +31,7 @@ _SEED = 42
 _BASE_ENEMY_HP = 4.0
 
 
-def _config(*, enemy_hp: float, spawn_concurrent: int = 3) -> object:
+def _config(*, enemy_hp: float, spawn_concurrent: int = 3) -> Config:
     """A config that varies ONLY enemy hp (and optionally the spawn concurrency).
 
     Everything else -- weapons, viewport, director cadence, seed handling -- is
