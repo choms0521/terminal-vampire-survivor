@@ -239,6 +239,10 @@ class SimState:
         (set by the loop on entering levelup; the overlay renders them).
       * level_up_pending: bool flag set by step stage 8 when xp crosses the
         threshold; CLEARED by the loop's draft selection, never by step.
+      * kills: cumulative enemy-death count, incremented by step's death stage
+        (one per enemy that dies, counted the single tick it dies before
+        cleanup removes it). The HUD shows it and the headless driver / balance
+        tests read it as a run-outcome metric.
       * next_id: monotonic id counter; ``alloc_id`` hands out the next id.
       * elapsed: survival timer in seconds (advanced by step using the fixed dt).
     """
@@ -255,6 +259,7 @@ class SimState:
         self.spawn_accumulator: float = 0.0
         self.pending_choices: tuple[Choice, ...] = ()
         self.level_up_pending: bool = False
+        self.kills: int = 0
         self.next_id: int = 0
         self.elapsed: float = 0.0
 

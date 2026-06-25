@@ -323,15 +323,21 @@ def _resolve_collisions(state: SimState, cfg: Config) -> None:
         player.x, player.y = new_x, new_y
 
 
-# --- Stage 7: death -> xp gem drop -------------------------------------------
+# --- Stage 7: death -> xp gem drop + kill count ------------------------------
 def _drop_xp_on_death(state: SimState, rng: random.Random) -> None:
-    """Drop an xp gem at each dead enemy's position.
+    """Drop an xp gem at each dead enemy's position and tally the kill.
 
-    ``rng`` is accepted for future drop-table variety (deferred to Phase 3);
-    Phase 2 drops a single fixed-value gem per kill, so it is unused here.
+    A dead enemy is present for exactly the tick it dies: stage 6 sets its hp to
+    <= 0, this stage (7) sees it, and stage 9 cleanup removes it before the next
+    tick. So iterating dead enemies here counts each kill exactly once -- the
+    single home for the ``state.kills`` tally (HUD + run-outcome metric).
+
+    ``rng`` is accepted for future drop-table variety (deferred); a single
+    fixed-value gem is dropped per kill, so it is unused here.
     """
     for enemy in state.enemies:
         if rules_damage.is_dead(enemy.hp):
+            state.kills += 1
             state.pickups.append(
                 Pickup(
                     entity_id=state.alloc_id(),

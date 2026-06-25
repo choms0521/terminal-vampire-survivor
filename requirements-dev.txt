@@ -1,0 +1,6 @@
+# Development dependencies: the runtime deps plus the headless test stack.
+# Install with:  pip install -r requirements-dev.txt
+-r requirements.txt
+
+pytest>=8.0
+pytest-cov>=5.0

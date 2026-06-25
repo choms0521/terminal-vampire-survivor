@@ -11,8 +11,10 @@
 #
 # Performance operating-point constants live in tuning.toml, not here.
 #
-# Starting values below are initial Phase 2 estimates and will be balanced in a
-# later phase; Phase 2 only proves that builds diverge and evolution triggers.
+# Values below began as Phase 2 estimates; Phase 3 applies a first-pass
+# difficulty-curve tune (see the [director] section). They remain data-driven
+# dials -- balance is changed by editing this file, never code (proven by
+# tests/test_balance_sensitivity.py).
 
 # Leveling: N-pick draft size and the xp curve. xp to clear level L is
 # xp_curve_base * xp_curve_growth ** (L - 1).
@@ -113,14 +115,22 @@ result_weapon    = "dagger_evolved"
 
 # Director difficulty curve. Spawn interval shrinks (spawn rate rises) over time;
 # reinforce_steps is a per-minute table of [minute, interval_mult, concurrent].
+#
+# Phase 3 first-pass tune: the reinforce ramp now continues past minute 3 (it
+# previously plateaued there) so late-game pressure keeps rising -- concurrency
+# climbs to 6 and the interval multiplier keeps shrinking toward the floor. The
+# effective interval is base_spawn_interval * interval_mult, clamped at
+# min_spawn_interval.
 [director]
 base_spawn_interval = 2.0
 min_spawn_interval  = 0.4
 reinforce_steps = [
-  [0, 1.0, 1],
-  [1, 0.8, 2],
-  [2, 0.6, 3],
-  [3, 0.5, 4],
+  [0, 1.0,  1],
+  [1, 0.85, 2],
+  [2, 0.7,  3],
+  [3, 0.55, 4],
+  [4, 0.45, 5],
+  [5, 0.35, 6],
 ]
 
 # Pickup: base magnet (xp-gem auto-collect) radius in world units. The magnet
