@@ -30,6 +30,8 @@ from dataclasses import replace
 from time import monotonic
 
 from .config import Config
+from .meta.accrue import RunResult, accrue_meta
+from .meta.save import DEFAULT_SAVE_PATH, load_meta, save_meta
 from .render.frame import render_frame
 from .rules import leveling
 from .sim.state import Intent, new_run, reconcile_weapon_cooldowns
@@ -159,7 +161,9 @@ def _drain_levelups(state, cfg: Config, rng: random.Random) -> None:
     state.pending_choices = ()
 
 
-def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
+def run(
+    term, cfg: Config, rng: random.Random, sim=None, save_path=DEFAULT_SAVE_PATH
+) -> None:
     """Run the fixed-timestep game loop until a quit key or the player dies.
 
     The simulation advances in fixed ``sim_dt`` sub-steps consumed from a time
@@ -170,8 +174,13 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
     is created; tests may inject a primed ``SimState`` (e.g. with a pending
     level-up) to exercise a specific mode transition deterministically.
     """
+    # Load cross-run meta and inject it into the run. A primed test sim carries
+    # its own meta, so reuse that rather than clobbering it from disk.
+    meta = load_meta(save_path)
     if sim is None:
-        sim = new_run(cfg, rng)
+        sim = new_run(cfg, rng, meta)
+    else:
+        meta = sim.meta
     # Capture the player's full hp as the HUD's HP-bar denominator BEFORE any
     # step mutates it -- there is no max_hp field in the contract, so this avoids
     # both a hardcoded 100 and importing a private start constant.
@@ -218,6 +227,12 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
 
             if sim.player.hp <= 0.0:
                 mode = _MODE_GAMEOVER
+                # Bank this run's gold once on the play->gameover transition and
+                # persist it (gold = kills * balance gold_per_kill). This branch
+                # runs only on the transition, so the save happens exactly once.
+                run_gold = sim.kills * cfg.defs.gold_per_kill
+                meta = accrue_meta(meta, RunResult(gold_earned=run_gold))
+                save_meta(meta, save_path)
             elif sim.level_up_pending:
                 mode = _MODE_LEVELUP
                 # Roll the draft once on entering levelup so the overlay has cards
@@ -273,7 +288,9 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
             # HP-bar denominator and resets the input + clock so the time spent on
             # the game-over screen is not charged as a catch-up backlog.
             if str(key) == _RESTART_KEY:
-                sim = new_run(cfg, rng)
+                # Restart from the accrued meta (gold/upgrades banked at game over),
+                # so a permanent upgrade bought on the game-over screen takes effect.
+                sim = new_run(cfg, rng, meta)
                 max_hp = sim.player.hp
                 intent = Intent(0, 0)
                 mode = _MODE_PLAY

@@ -19,6 +19,7 @@ import random
 from dataclasses import replace
 
 from terminal_vs.loop import _drain_levelups, apply_draft_selection, run
+from terminal_vs.meta.save import load_meta
 from terminal_vs.rules.leveling import xp_for_level
 from terminal_vs.sim.state import new_run
 
@@ -139,7 +140,7 @@ def test_levelup_overlay_select_returns_to_play():
     assert sim.pending_choices == ()
 
 
-def test_gameover_restart_repaints_a_fresh_play_frame(capsys):
+def test_gameover_restart_repaints_a_fresh_play_frame(capsys, tmp_path):
     """play -> (hp<=0) game-over overlay -> 'r' restart -> fresh full-hp play frame.
 
     The restart key on the game-over screen must start a NEW run and repaint a
@@ -157,7 +158,7 @@ def test_gameover_restart_repaints_a_fresh_play_frame(capsys):
 
     term = _FakeTerm([_FakeKey(""), _FakeKey("r"), _FakeKey("q")])
     term.home = "<F>"  # frame separator so the captured frames can be split
-    run(term, cfg, rng, sim=sim)
+    run(term, cfg, rng, sim=sim, save_path=tmp_path / "meta.json")
 
     # Derive the expected full-HP token from a reference fresh run instead of
     # hardcoding "100/100", so the assertion follows the start HP / HUD format.
@@ -168,6 +169,23 @@ def test_gameover_restart_repaints_a_fresh_play_frame(capsys):
     assert any("GAME OVER" in f for f in frames)  # the game-over overlay was shown
     assert "GAME OVER" not in frames[-1]          # ended on a play frame (restarted)
     assert full_hp_token in frames[-1]            # fresh full hp after the restart
+
+
+def test_gameover_banks_run_gold_to_the_save(tmp_path):
+    """On the play->game-over transition the run's gold (kills * gold_per_kill) is
+    accrued into the meta and persisted to save_path."""
+    cfg = make_config()
+    rng = random.Random(0)
+    save = tmp_path / "meta.json"
+    sim = new_run(cfg, rng)
+    sim.player.hp = 0.0  # first play poll trips game-over
+    sim.kills = 5
+    term = _FakeTerm([_FakeKey(""), _FakeKey("q")])  # trip game-over, then quit
+    run(term, cfg, rng, sim=sim, save_path=save)
+
+    saved = load_meta(save)
+    assert saved.gold == 5 * cfg.defs.gold_per_kill
+    assert saved.total_runs == 1
 
 
 def test_pause_resume_repaints_a_play_frame(capsys):
