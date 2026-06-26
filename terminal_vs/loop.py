@@ -191,10 +191,12 @@ def run(
     is created; tests may inject a primed ``SimState`` (e.g. with a pending
     level-up) to exercise a specific mode transition deterministically.
     """
-    # Load cross-run meta and inject it into the run. A primed test sim carries
-    # its own meta, so reuse that rather than clobbering it from disk.
-    meta = load_meta(save_path)
+    # Load cross-run meta and inject it into a fresh run. A primed test sim carries
+    # its own authoritative meta, so reuse that and skip the disk load entirely --
+    # this avoids needless IO and a MetaSaveError from a save the injected run
+    # would ignore anyway.
     if sim is None:
+        meta = load_meta(save_path)
         sim = new_run(cfg, rng, meta)
     else:
         meta = sim.meta

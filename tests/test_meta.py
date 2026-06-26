@@ -186,3 +186,23 @@ def test_spend_gold_does_not_mutate_old_meta():
     spend_gold(old, "swift", _defs_with_swift())
     assert old.gold == 100
     assert dict(old.upgrades) == {}
+
+
+def test_metastate_upgrades_mapping_is_read_only():
+    """A frozen MetaState exposes upgrades as a read-only mapping: an in-place
+    edit raises, so the injected meta cannot be mutated to break run determinism
+    (frozen=True alone would not stop meta.upgrades[k] = v on a plain dict)."""
+    meta = MetaState(upgrades={"swift": 1})
+    with pytest.raises(TypeError):
+        meta.upgrades["swift"] = 5  # type: ignore[index]
+    with pytest.raises(TypeError):
+        meta.upgrades["new"] = 1  # type: ignore[index]
+
+
+def test_read_only_upgrades_still_round_trips_and_compares_equal(tmp_path):
+    """Wrapping upgrades read-only must not change equality or the save round-trip."""
+    state = MetaState(gold=30, upgrades={"swift": 2, "fury": 1})
+    assert state == MetaState(gold=30, upgrades={"swift": 2, "fury": 1})
+    path = tmp_path / "meta.json"
+    save_meta(state, path)
+    assert load_meta(path) == state

@@ -211,6 +211,18 @@ def test_gameover_digit_key_buys_a_permanent_upgrade(tmp_path):
     assert saved.gold == 200 - 50  # injected gold minus cost_base
 
 
+def test_injected_sim_skips_disk_load(tmp_path):
+    """A primed sim is authoritative: run() must not read save_path for it, so a
+    corrupt save cannot crash a caller (or test) that injects its own sim."""
+    cfg = make_config()
+    rng = random.Random(0)
+    save = tmp_path / "meta.json"
+    save.write_text("{ corrupt", encoding="utf-8")  # would raise if it were loaded
+    sim = new_run(cfg, rng)  # carries its own default meta; hp > 0 (no game-over)
+    term = _FakeTerm([_FakeKey("q")])  # quit immediately
+    run(term, cfg, rng, sim=sim, save_path=save)  # must not raise
+
+
 def test_pause_resume_repaints_a_play_frame(capsys):
     """play -> 'p' pause overlay -> 'p' resume -> immediate play repaint.
 

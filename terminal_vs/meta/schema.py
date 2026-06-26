@@ -9,6 +9,7 @@ frozen dataclass with value equality -- the round-trip tests rely on ``==``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Mapping
 
 
@@ -27,6 +28,15 @@ class MetaState:
     upgrades: Mapping[str, int] = field(default_factory=dict)
     unlocked: frozenset[str] = field(default_factory=frozenset)
     total_runs: int = 0
+
+    def __post_init__(self) -> None:
+        # ``frozen=True`` blocks field reassignment but NOT in-place mutation of a
+        # plain dict (``meta.upgrades[k] = v``). Wrap ``upgrades`` read-only so the
+        # injected meta is genuinely immutable and run determinism cannot be broken
+        # by an accidental edit. ``unlocked`` is already a frozenset; gold /
+        # total_runs are ints. Equality/round-trip is unaffected: a read-only proxy
+        # compares equal to the dict it wraps.
+        object.__setattr__(self, "upgrades", MappingProxyType(dict(self.upgrades)))
 
 
 class MetaSaveError(ValueError):
