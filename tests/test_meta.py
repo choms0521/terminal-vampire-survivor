@@ -11,6 +11,7 @@ import json
 
 import pytest
 
+from terminal_vs.meta.accrue import RunResult, accrue_meta
 from terminal_vs.meta.save import CURRENT_VERSION, load_meta, save_meta
 from terminal_vs.meta.schema import MetaSaveError, MetaState
 
@@ -87,3 +88,42 @@ def test_save_creates_parent_dir_under_saves_not_config(tmp_path):
     save_meta(MetaState(gold=1), path)
     assert path.exists()
     assert "config" not in path.parts
+
+
+# --- accrue_meta: the pure post-run progression update ----------------------
+
+
+def test_accrue_adds_gold_and_increments_run_count():
+    old = MetaState(
+        gold=100, upgrades={"haste": 1}, unlocked=frozenset({"lance"}), total_runs=2
+    )
+    new = accrue_meta(old, RunResult(gold_earned=50))
+    assert new.gold == 150
+    assert new.total_runs == 3
+    assert new.upgrades == {"haste": 1}  # carried over unchanged
+    assert new.unlocked == frozenset({"lance"})  # carried over unchanged (v1: no gating)
+
+
+def test_accrue_does_not_mutate_the_old_meta():
+    old = MetaState(gold=100, total_runs=2)
+    accrue_meta(old, RunResult(gold_earned=50))
+    assert old.gold == 100  # frozen + a new object is returned, old is untouched
+    assert old.total_runs == 2
+
+
+def test_accrue_from_default_meta_counts_the_first_run():
+    new = accrue_meta(MetaState(), RunResult(gold_earned=0))
+    assert new == MetaState(total_runs=1)
+
+
+def test_accrue_result_survives_save_round_trip(tmp_path):
+    # The post-run pipeline: accrue -> save -> load returns the same state.
+    path = tmp_path / "meta.json"
+    new = accrue_meta(MetaState(gold=10), RunResult(gold_earned=25))
+    save_meta(new, path)
+    assert load_meta(path) == new
+
+
+def test_run_result_rejects_negative_gold():
+    with pytest.raises(ValueError):
+        RunResult(gold_earned=-1)
