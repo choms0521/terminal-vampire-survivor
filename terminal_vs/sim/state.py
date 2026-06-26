@@ -33,6 +33,7 @@ import random
 from dataclasses import dataclass
 
 from ..config import Config
+from ..meta.schema import MetaState
 from ..rules.defs import EnemyDef
 from ..rules.leveling import BuildState, Choice
 from ..world import Camera
@@ -290,6 +291,10 @@ class SimState:
         self.pickups: list[Pickup] = []
         self.camera: Camera = Camera(0.0, 0.0)
         self.build: BuildState = BuildState()
+        # Cross-run meta progression, injected read-only at run start (new_run).
+        # effective_stats folds its permanent upgrades on top of the passives;
+        # the sim never mutates it mid-tick (ADR-001).
+        self.meta: MetaState = MetaState()
         self.weapon_cooldowns: dict[str, float] = {}
         self.spawn_accumulator: float = 0.0
         self.pending_choices: tuple[Choice, ...] = ()
@@ -324,7 +329,9 @@ def reconcile_weapon_cooldowns(state: SimState) -> None:
             del state.weapon_cooldowns[name]
 
 
-def new_run(cfg: Config, rng: random.Random) -> SimState:
+def new_run(
+    cfg: Config, rng: random.Random, meta: MetaState | None = None
+) -> SimState:
     """Create a fresh mutable SimState for a new run.
 
     ``rng`` is accepted for signature symmetry with step/maybe_spawn (and future
@@ -338,6 +345,10 @@ def new_run(cfg: Config, rng: random.Random) -> SimState:
     weapon), so the dagger is ready to fire on the first tick.
     """
     state = SimState(cfg)
+    # Inject the cross-run meta read-only (a default empty MetaState if none is
+    # given, e.g. tests / first launch). effective_stats reads it from state.meta.
+    if meta is not None:
+        state.meta = meta
     player = Player(
         entity_id=state.alloc_id(),
         x=0.0,

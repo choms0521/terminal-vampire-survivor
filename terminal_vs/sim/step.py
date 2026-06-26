@@ -139,7 +139,7 @@ def _apply_input(state: SimState, intent: Intent, cfg: Config, dt: float) -> Non
     direction so the forward_arc weapon aims where the player is heading; an idle
     tick keeps the previous facing.
     """
-    stats = rules_leveling.effective_stats(state.build, cfg.defs)
+    stats = rules_leveling.effective_stats(state.build, cfg.defs, state.meta)
     base_speed = _reference_move_speed(cfg.defs)
     speed = base_speed * _PLAYER_SPEED_MULT * stats.move_speed_mult
 
@@ -207,7 +207,7 @@ def _fire_weapons(
     count / cooldown. Each shot uses the weapon def's base numbers.
     """
     reconcile_weapon_cooldowns(state)
-    stats = rules_leveling.effective_stats(state.build, cfg.defs)
+    stats = rules_leveling.effective_stats(state.build, cfg.defs, state.meta)
     player = state.player
     enemy_positions = tuple((e.id, e.x, e.y) for e in state.enemies)
     player_pos = (player.x, player.y)
@@ -404,7 +404,7 @@ def _collect_pickups(state: SimState, cfg: Config) -> None:
     into ``state.build`` and the flag is SET here when xp crosses the threshold;
     it is CLEARED by the loop applying a draft choice (step never clears it).
     """
-    stats = rules_leveling.effective_stats(state.build, cfg.defs)
+    stats = rules_leveling.effective_stats(state.build, cfg.defs, state.meta)
     magnet_r = cfg.defs.magnet_range * stats.magnet_mult
     magnet_r2 = magnet_r * magnet_r
     px, py = state.player.x, state.player.y
