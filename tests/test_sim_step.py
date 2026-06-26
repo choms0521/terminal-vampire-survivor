@@ -327,3 +327,36 @@ def test_orbit_damages_an_enemy_repeatedly_over_time():
     dmg = hp0 - state.enemies[0].hp
     wdef = cfg.defs.weapons["orbit"]
     assert dmg > wdef.projectile_count * wdef.damage  # re-hit across lives, not one-shot
+
+
+def test_orbit_does_not_stack_rings_under_attack_speed_passive():
+    """The attack_speed passive (< 1) shrinks the effective cooldown
+    (``cooldown * attack_speed_mult``). The orbit ttl is scaled by the SAME
+    factor, so the ring still expires strictly before the next spawn -- at most
+    ``projectile_count`` orbit projectiles are alive at any tick, at any passive
+    level.
+
+    Without the ttl scaling the max attack_speed passive drops the effective
+    cooldown (~39 ticks at 0.92**5) below the fixed ttl (~56 ticks), so a second
+    ring spawns while the first is still alive: the ring stacks (6 projectiles)
+    and damage inflates. Max level is the worst case (shortest cooldown).
+    """
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    state.build = replace(
+        state.build,
+        weapon_levels=(("orbit", 1),),
+        passive_levels=(("attack_speed", 5),),  # max -> shortest cooldown, worst case
+    )
+    state.weapon_cooldowns = {"orbit": 0.0}
+    # An enemy must exist for orbit to fire; kind 'pinned' has no EnemyDef so it
+    # stays put and never dies, keeping the weapon firing every cooldown.
+    state.enemies.append(
+        Enemy(state.alloc_id(), state.player.x + 4.0, state.player.y, hp=1e9, kind="pinned")
+    )
+    count = cfg.defs.weapons["orbit"].projectile_count
+
+    for _ in range(200):  # well past several scaled cooldowns
+        step(state, Intent(0, 0), cfg, random.Random(0))
+        orbiters = [p for p in state.projectiles if p.orbit_radius > 0.0]
+        assert len(orbiters) <= count  # never stacks, even under max attack_speed

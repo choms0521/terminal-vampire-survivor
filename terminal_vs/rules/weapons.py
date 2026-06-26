@@ -282,7 +282,15 @@ def _make_orbit(ctx: FireContext) -> tuple[ProjectileSpec, ...]:
                 vx=0.0,
                 vy=0.0,
                 damage=weapon.damage,
-                ttl=weapon.projectile_ttl,
+                # Scale ttl by the SAME attack_speed factor that tick_weapon
+                # applies to the cooldown reset (cooldown * attack_speed_mult), so
+                # the load-time ``ttl < cooldown`` ratio is preserved at every
+                # passive level. Without this, the attack_speed passive (< 1)
+                # shrinks the effective cooldown below the fixed ttl, letting a
+                # new ring spawn before the previous one expires -- the rings stack
+                # and damage inflates. Orbit-only: a straight projectile's ttl is
+                # flight lifetime and must not shrink with attack speed.
+                ttl=weapon.projectile_ttl * ctx.attack_speed_mult,
                 pierce=weapon.pierce,
                 orbit_radius=weapon.orbit_radius,
                 orbit_angle=angle,
