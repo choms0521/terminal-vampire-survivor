@@ -225,3 +225,10 @@ def test_shipped_config_loads_and_validates():
     assert weapons["nova"].targeting == "radial"  # nova is the 360-deg burst
     assert weapons["orbit"].targeting == "orbit"  # orbit revolves around the player
     assert weapons["orbit"].orbit_radius == 4.0  # the ring radius
+
+    # Phase 4A permanent (cross-run) upgrades parse from the shipped balance.toml.
+    upgrades = cfg.defs.upgrades
+    assert upgrades["swift"].stat == "move_speed"
+    assert upgrades["fury"].stat == "attack_speed"
+    assert upgrades["fury"].cost_base == 60
+    assert cfg.defs.gold_per_kill == 1  # Phase 4A: gold banked per enemy kill

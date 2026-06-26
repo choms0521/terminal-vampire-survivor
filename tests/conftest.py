@@ -24,6 +24,7 @@ from terminal_vs.rules.defs import (
     EnemyDef,
     EvolutionDef,
     LevelingDef,
+    MetaUpgradeDef,
     PassiveDef,
     ReinforceStep,
     WeaponDef,
@@ -34,6 +35,7 @@ def make_defs(
     *,
     weapons: dict[str, WeaponDef] | None = None,
     passives: dict[str, PassiveDef] | None = None,
+    upgrades: dict[str, MetaUpgradeDef] | None = None,
     enemies: dict[str, EnemyDef] | None = None,
     evolutions: tuple[EvolutionDef, ...] | None = None,
     director: DirectorDef | None = None,
@@ -199,9 +201,12 @@ def make_defs(
         leveling = LevelingDef(
             draft_choices=3, xp_curve_base=5.0, xp_curve_growth=1.5
         )
+    if upgrades is None:
+        upgrades = {}
     return BalanceDefs(
         weapons=weapons,
         passives=passives,
+        upgrades=upgrades,
         enemies=enemies,
         evolutions=evolutions,
         director=director,

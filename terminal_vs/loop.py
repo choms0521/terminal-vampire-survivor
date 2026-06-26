@@ -30,6 +30,8 @@ from dataclasses import replace
 from time import monotonic
 
 from .config import Config
+from .meta.accrue import RunResult, accrue_meta, spend_gold
+from .meta.save import DEFAULT_SAVE_PATH, load_meta, save_meta
 from .render.frame import render_frame
 from .rules import leveling
 from .sim.state import Intent, new_run, reconcile_weapon_cooldowns
@@ -159,7 +161,26 @@ def _drain_levelups(state, cfg: Config, rng: random.Random) -> None:
     state.pending_choices = ()
 
 
-def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
+def _try_buy_upgrade(meta, key: str, cfg: Config):
+    """Map a game-over shop digit to a spend_gold purchase.
+
+    Returns the new ``MetaState`` if ``key`` is a digit naming an upgrade in the
+    sorted shop order (1-based), else ``None``. ``spend_gold`` itself no-ops when
+    the upgrade is maxed or unaffordable, so the returned meta may equal the input
+    -- the caller re-saves / repaints either way, which is harmless.
+    """
+    if not key.isdigit():
+        return None
+    idx = int(key) - 1
+    upgrade_ids = sorted(cfg.defs.upgrades)
+    if not 0 <= idx < len(upgrade_ids):
+        return None
+    return spend_gold(meta, upgrade_ids[idx], cfg.defs)
+
+
+def run(
+    term, cfg: Config, rng: random.Random, sim=None, save_path=DEFAULT_SAVE_PATH
+) -> None:
     """Run the fixed-timestep game loop until a quit key or the player dies.
 
     The simulation advances in fixed ``sim_dt`` sub-steps consumed from a time
@@ -170,8 +191,15 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
     is created; tests may inject a primed ``SimState`` (e.g. with a pending
     level-up) to exercise a specific mode transition deterministically.
     """
+    # Load cross-run meta and inject it into a fresh run. A primed test sim carries
+    # its own authoritative meta, so reuse that and skip the disk load entirely --
+    # this avoids needless IO and a MetaSaveError from a save the injected run
+    # would ignore anyway.
     if sim is None:
-        sim = new_run(cfg, rng)
+        meta = load_meta(save_path)
+        sim = new_run(cfg, rng, meta)
+    else:
+        meta = sim.meta
     # Capture the player's full hp as the HUD's HP-bar denominator BEFORE any
     # step mutates it -- there is no max_hp field in the contract, so this avoids
     # both a hardcoded 100 and importing a private start constant.
@@ -218,6 +246,15 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
 
             if sim.player.hp <= 0.0:
                 mode = _MODE_GAMEOVER
+                # Bank this run's gold once on the play->gameover transition and
+                # persist it (gold = kills * balance gold_per_kill). This branch
+                # runs only on the transition, so the save happens exactly once.
+                run_gold = sim.kills * cfg.defs.gold_per_kill
+                meta = accrue_meta(meta, RunResult(gold_earned=run_gold))
+                save_meta(meta, save_path)
+                # Mirror the banked meta onto the (now finished) sim so the
+                # game-over overlay's gold + shop reflect this run's earnings.
+                sim.meta = meta
             elif sim.level_up_pending:
                 mode = _MODE_LEVELUP
                 # Roll the draft once on entering levelup so the overlay has cards
@@ -273,10 +310,22 @@ def run(term, cfg: Config, rng: random.Random, sim=None) -> None:
             # HP-bar denominator and resets the input + clock so the time spent on
             # the game-over screen is not charged as a catch-up backlog.
             if str(key) == _RESTART_KEY:
-                sim = new_run(cfg, rng)
+                # Restart from the accrued meta (gold/upgrades banked at game over),
+                # so a permanent upgrade bought on the game-over screen takes effect.
+                sim = new_run(cfg, rng, meta)
                 max_hp = sim.player.hp
                 intent = Intent(0, 0)
                 mode = _MODE_PLAY
                 last = monotonic()
                 accumulator = 0.0
                 render_frame(term, sim, sim.camera, cfg, max_hp, mode)
+            else:
+                # A shop digit buys a permanent upgrade with the banked gold;
+                # persist and repaint in place so the gold/shop lines update.
+                # Non-digit / out-of-range keys return None and are ignored.
+                bought = _try_buy_upgrade(meta, str(key), cfg)
+                if bought is not None:
+                    meta = bought
+                    save_meta(meta, save_path)
+                    sim.meta = meta
+                    render_frame(term, sim, sim.camera, cfg, max_hp, mode)

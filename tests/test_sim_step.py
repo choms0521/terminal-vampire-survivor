@@ -10,7 +10,8 @@ import random
 
 from dataclasses import replace
 
-from terminal_vs.rules.defs import EnemyDef
+from terminal_vs.meta.schema import MetaState
+from terminal_vs.rules.defs import EnemyDef, MetaUpgradeDef
 from terminal_vs.sim.state import Enemy, Intent, new_run
 from terminal_vs.sim.step import (
     _PLAYER_FALLBACK_BASE_SPEED,
@@ -360,3 +361,49 @@ def test_orbit_does_not_stack_rings_under_attack_speed_passive():
         step(state, Intent(0, 0), cfg, random.Random(0))
         orbiters = [p for p in state.projectiles if p.orbit_radius > 0.0]
         assert len(orbiters) <= count  # never stacks, even under max attack_speed
+
+
+def test_new_run_injects_meta_read_only():
+    """new_run stores the injected meta on state.meta; the default is empty."""
+    cfg = make_config()
+    m = MetaState(gold=10, upgrades={"swift": 2})
+    assert new_run(cfg, random.Random(0), meta=m).meta == m
+    assert new_run(cfg, random.Random(0)).meta == MetaState()  # default empty
+
+
+def test_meta_move_speed_upgrade_makes_the_player_faster():
+    """A move_speed permanent upgrade injected via new_run moves the player farther
+    per tick than an unupgraded run (same seed + input), proving step threads
+    state.meta into effective_stats."""
+    defs = make_defs(
+        upgrades={"swift": MetaUpgradeDef("swift", 5, "move_speed", 1.5, 50, 1.5)}
+    )
+    cfg = make_config(defs=defs)
+    intent = Intent(1, 0)  # hold +x
+    base = new_run(cfg, random.Random(0))  # no upgrade
+    boosted = new_run(cfg, random.Random(0), meta=MetaState(upgrades={"swift": 1}))
+    for _ in range(5):
+        step(base, intent, cfg, random.Random(0))
+        step(boosted, intent, cfg, random.Random(0))
+    assert boosted.player.x > base.player.x  # 1.5x move_speed -> farther in x
+
+
+def test_same_seed_same_meta_yields_identical_end_state():
+    """A run is determined by (seed + injected MetaState): two runs with the same
+    seed and the same meta produce a byte-identical end snapshot -- the run-level
+    determinism guarantee with a permanent upgrade in play."""
+    cfg = make_config(
+        defs=make_defs(
+            upgrades={"swift": MetaUpgradeDef("swift", 5, "move_speed", 1.1, 50, 1.5)}
+        )
+    )
+    meta = MetaState(gold=100, upgrades={"swift": 2})
+
+    def play():
+        state = new_run(cfg, random.Random(7), meta=meta)
+        rng = random.Random(7)
+        for _ in range(80):
+            step(state, Intent(1, 0), cfg, rng)
+        return _snapshot(state)
+
+    assert play() == play()

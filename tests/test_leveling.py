@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 import random
 
+from terminal_vs.meta.schema import MetaState
+from terminal_vs.rules.defs import MetaUpgradeDef
 from terminal_vs.rules.leveling import (
     BuildState,
     Choice,
@@ -130,3 +132,44 @@ def test_passive_multiplies_stats():
     assert abs(mv.move_speed_mult - 1.08) < 1e-9
     mg = effective_stats(BuildState(passive_levels=(("magnet", 1),)), defs)
     assert abs(mg.magnet_mult - 1.25) < 1e-9
+
+
+def test_meta_upgrade_multiplies_its_stat():
+    """A permanent upgrade multiplies the stat its MetaUpgradeDef names, per level."""
+    defs = make_defs(
+        upgrades={"swift": MetaUpgradeDef("swift", 5, "move_speed", 1.1, 50, 1.5)}
+    )
+    s = effective_stats(BuildState(), defs, MetaState(upgrades={"swift": 2}))
+    assert abs(s.move_speed_mult - 1.1 ** 2) < 1e-9  # two levels compound
+    assert s.attack_speed_mult == 1.0  # other stats untouched
+
+
+def test_meta_upgrade_stacks_on_top_of_a_passive_on_the_same_stat():
+    """A permanent move_speed upgrade and an in-run move_speed passive both apply."""
+    defs = make_defs(
+        upgrades={"swift": MetaUpgradeDef("swift", 5, "move_speed", 1.1, 50, 1.5)}
+    )
+    s = effective_stats(
+        BuildState(passive_levels=(("move_speed", 1),)),
+        defs,
+        MetaState(upgrades={"swift": 1}),
+    )
+    assert abs(s.move_speed_mult - 1.08 * 1.1) < 1e-9  # passive 1.08 * upgrade 1.1
+
+
+def test_meta_none_is_passive_only_backward_compatible():
+    """meta=None (or omitted) reproduces the pre-Phase-4 passive-only stats."""
+    defs = make_defs()
+    build = BuildState(passive_levels=(("move_speed", 2),))
+    assert effective_stats(build, defs, None) == effective_stats(build, defs)
+
+
+def test_unknown_or_zero_level_upgrade_is_skipped():
+    """An upgrade id with no def, or owned at level 0, is ignored (identity)."""
+    defs = make_defs(
+        upgrades={"swift": MetaUpgradeDef("swift", 5, "move_speed", 1.1, 50, 1.5)}
+    )
+    ghost = effective_stats(BuildState(), defs, MetaState(upgrades={"ghost": 3}))
+    zero = effective_stats(BuildState(), defs, MetaState(upgrades={"swift": 0}))
+    assert ghost == effective_stats(BuildState(), defs)
+    assert zero == effective_stats(BuildState(), defs)

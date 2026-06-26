@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import random
 
+from terminal_vs.meta.schema import MetaState
 from terminal_vs.render.hud import hud_lines, overlay_lines
+from terminal_vs.rules.defs import MetaUpgradeDef
 from terminal_vs.rules.leveling import Choice
 from terminal_vs.sim.state import new_run
 
-from .conftest import make_config
+from .conftest import make_config, make_defs
 
 
 def _fresh(kills: int = 0):
@@ -99,3 +101,17 @@ def test_gameover_overlay_summarizes_the_run():
     assert "kills 17" in panel
     assert "level 1" in panel
     assert "restart" in panel  # the restart key is advertised
+
+
+def test_gameover_overlay_shows_gold_and_upgrade_shop():
+    """The gameover panel lists banked gold and a numbered shop line per upgrade."""
+    cfg = make_config(
+        defs=make_defs(
+            upgrades={"swift": MetaUpgradeDef("swift", 5, "move_speed", 1.1, 50, 1.5)}
+        )
+    )
+    state = new_run(cfg, random.Random(0), meta=MetaState(gold=120))
+    panel = "\n".join(overlay_lines("gameover", state))
+    assert "gold 120" in panel
+    assert "[1] swift" in panel  # numbered shop line for the upgrade
+    assert "50g" in panel  # next-level cost at level 0 (cost_base)
