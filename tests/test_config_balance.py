@@ -192,6 +192,52 @@ def test_orbit_ttl_not_less_than_cooldown_raises(tmp_path):
     assert "cooldown" in msg
 
 
+_UPGRADE_BLOCK = (
+    "\n[upgrades.swift]\n"
+    "max_level = 5\n"
+    'stat = "move_speed"\n'
+    "multiplier_per_level = 1.08\n"
+    "cost_base = 50\n"
+    "cost_growth = 1.6\n"
+)
+
+
+def test_upgrades_parse_into_meta_upgrade_defs(tmp_path):
+    """A valid [upgrades.*] section loads into MetaUpgradeDef entries on defs."""
+    cfg = _load(tmp_path, VALID_BALANCE + _UPGRADE_BLOCK)
+    up = cfg.defs.upgrades["swift"]
+    assert up.stat == "move_speed"
+    assert up.max_level == 5
+    assert up.multiplier_per_level == 1.08
+    assert up.cost_base == 50
+    assert up.cost_growth == 1.6
+
+
+def test_no_upgrades_section_yields_empty_table(tmp_path):
+    """Permanent upgrades are optional content -- absent section -> empty table
+    (no default-name injection, unlike weapons/passives)."""
+    cfg = _load(tmp_path)  # VALID_BALANCE has no [upgrades.*]
+    assert dict(cfg.defs.upgrades) == {}
+
+
+def test_upgrade_invalid_stat_raises(tmp_path):
+    """An upgrade targeting a stat effective_stats does not know is rejected at load."""
+    bad = _UPGRADE_BLOCK.replace('stat = "move_speed"', 'stat = "luck"')
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    msg = str(exc.value)
+    assert "stat" in msg
+    assert "config/balance.toml" in msg
+
+
+def test_upgrade_cost_growth_below_one_raises(tmp_path):
+    """cost_growth < 1 would make higher upgrade levels cheaper; rejected at load."""
+    bad = _UPGRADE_BLOCK.replace("cost_growth = 1.6", "cost_growth = 0.5")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "cost_growth" in str(exc.value)
+
+
 def test_missing_key_falls_back_to_default(tmp_path):
     """A weapon entry missing keys falls back to code defaults for those keys."""
     # dagger present but only declares cooldown; the rest fall back.

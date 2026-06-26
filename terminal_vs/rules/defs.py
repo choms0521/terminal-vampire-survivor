@@ -88,6 +88,26 @@ class PassiveDef:
 
 
 @dataclass(frozen=True)
+class MetaUpgradeDef:
+    """Immutable definition of one permanent (cross-run) upgrade (Phase 4A).
+
+    A permanent upgrade is bought with gold between runs and applied read-only at
+    run start. ``stat`` names which ``effective_stats`` field it multiplies -- the
+    same stat ids the passives map to ("attack_speed" / "move_speed" / "magnet")
+    -- and ``multiplier_per_level`` is applied once per owned level (product over
+    levels), mirroring :class:`PassiveDef`. The gold price of the NEXT level is
+    ``cost_base * cost_growth ** current_level`` (geometric, like the xp curve).
+    """
+
+    name: str
+    max_level: int
+    stat: str
+    multiplier_per_level: float
+    cost_base: int
+    cost_growth: float
+
+
+@dataclass(frozen=True)
 class EnemyDef:
     """Immutable definition of one enemy type.
 
@@ -181,6 +201,9 @@ class BalanceDefs:
     passives: Mapping[str, PassiveDef] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    upgrades: Mapping[str, MetaUpgradeDef] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
     enemies: Mapping[str, EnemyDef] = field(
         default_factory=lambda: MappingProxyType({})
     )
@@ -212,6 +235,7 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
     """
     weapons_raw: dict = raw_balance.get("weapons", {})
     passives_raw: dict = raw_balance.get("passives", {})
+    upgrades_raw: dict = raw_balance.get("upgrades", {})
     enemies_raw: dict = raw_balance.get("enemies", {})
     evolutions_raw: dict = raw_balance.get("evolution", {})
     director_raw: dict = raw_balance.get("director", {})
@@ -248,6 +272,18 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
             multiplier_per_level=float(p["multiplier_per_level"]),
         )
         for name, p in passives_raw.items()
+    }
+
+    upgrades = {
+        name: MetaUpgradeDef(
+            name=name,
+            max_level=int(u["max_level"]),
+            stat=str(u["stat"]),
+            multiplier_per_level=float(u["multiplier_per_level"]),
+            cost_base=int(u["cost_base"]),
+            cost_growth=float(u["cost_growth"]),
+        )
+        for name, u in upgrades_raw.items()
     }
 
     enemies = {
@@ -301,6 +337,7 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
         # never mutate the shared balance table through cfg.defs.
         weapons=MappingProxyType(weapons),
         passives=MappingProxyType(passives),
+        upgrades=MappingProxyType(upgrades),
         enemies=MappingProxyType(enemies),
         evolutions=evolutions,
         director=director,

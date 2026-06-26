@@ -102,6 +102,19 @@ _DIRECTOR_DEFAULTS: dict[str, object] = {
 _PICKUP_DEFAULTS: dict[str, object] = {
     "magnet_range": 4.0,
 }
+_UPGRADE_DEFAULTS: dict[str, object] = {
+    "max_level": 3,
+    "stat": "move_speed",
+    "multiplier_per_level": 1.1,
+    "cost_base": 50,
+    "cost_growth": 1.5,
+}
+
+# Stats a permanent upgrade may target -- the same stat ids effective_stats maps
+# the passives to (rules/leveling), so an upgrade multiplies a known stat.
+_VALID_UPGRADE_STATS: frozenset[str] = frozenset(
+    {"attack_speed", "move_speed", "magnet"}
+)
 
 # Default content set, used when balance.toml omits a whole section (so the game
 # still has weapons/passives/enemies/evolutions on a first launch). Each entry is
@@ -274,6 +287,28 @@ def _validate_passive(name: str, p: dict) -> None:
     _require_positive(f"passives.{name}.multiplier_per_level", p["multiplier_per_level"])
 
 
+def _validate_upgrade(name: str, u: dict) -> None:
+    """Range/enum validation for one permanent-upgrade entry (Phase 4A)."""
+    _require_positive(f"upgrades.{name}.max_level", u["max_level"])
+    if u["stat"] not in _VALID_UPGRADE_STATS:
+        raise ValueError(
+            f"config: upgrades.{name}.stat must be one of "
+            f"{sorted(_VALID_UPGRADE_STATS)}, got {u['stat']!r} "
+            f"(check config/balance.toml)"
+        )
+    _require_positive(
+        f"upgrades.{name}.multiplier_per_level", u["multiplier_per_level"]
+    )
+    _require_positive(f"upgrades.{name}.cost_base", u["cost_base"])
+    # Cost must not shrink with level -- a growth < 1 would make higher levels
+    # cheaper. Mirrors the xp curve's "growth >= 1" progression intent.
+    if float(u["cost_growth"]) < 1.0:
+        raise ValueError(
+            f"config: upgrades.{name}.cost_growth must be >= 1.0, got "
+            f"{u['cost_growth']!r} (check config/balance.toml)"
+        )
+
+
 def _validate_enemy(name: str, e: dict) -> None:
     """Range validation for one enemy entry."""
     _require_positive(f"enemies.{name}.hp", e["hp"])
@@ -384,6 +419,16 @@ def _normalized_balance(balance_data: dict) -> dict:
         _validate_passive(name, p)
         passives[name] = p
 
+    # Permanent upgrades are optional content: no default-name injection (an
+    # absent [upgrades.*] section yields an empty table, unlike weapons/passives
+    # which fall back to a starter set so a run always has content).
+    upgrades_raw = balance_data.get("upgrades", {})
+    upgrades = {}
+    for name in upgrades_raw:
+        u = _merged_section(upgrades_raw, name, _UPGRADE_DEFAULTS)
+        _validate_upgrade(name, u)
+        upgrades[name] = u
+
     enemies_raw = balance_data.get("enemies", {})
     enemy_names = list(enemies_raw) or list(_DEFAULT_ENEMY_NAMES)
     enemies = {}
@@ -459,6 +504,7 @@ def _normalized_balance(balance_data: dict) -> dict:
         "leveling": leveling,
         "weapons": weapons,
         "passives": passives,
+        "upgrades": upgrades,
         "enemies": enemies,
         "evolution": evolution,
         "director": director,

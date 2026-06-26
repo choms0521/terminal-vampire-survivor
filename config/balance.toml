@@ -142,6 +142,23 @@ multiplier_per_level = 1.08
 max_level            = 5
 multiplier_per_level = 1.25
 
+# Permanent (cross-run) upgrades. Bought with gold between runs, applied read-only
+# at run start. `stat` names the effective_stats field multiplied (same ids as the
+# passives above); the next level's gold price is cost_base * cost_growth ** level.
+[upgrades.swift]              # permanent move-speed boost
+max_level            = 5
+stat                 = "move_speed"
+multiplier_per_level = 1.08
+cost_base            = 50
+cost_growth          = 1.6
+
+[upgrades.fury]               # permanent attack-speed boost (cooldown < 1)
+max_level            = 5
+stat                 = "attack_speed"
+multiplier_per_level = 0.95
+cost_base            = 60
+cost_growth          = 1.6
+
 # Enemies. hp / move_speed / spawn_weight drive the director's weighted spawn.
 # glyph and color are render hints consumed by sim/render (Chunk 2).
 [enemies.walker]              # slow basic chaser (many)
