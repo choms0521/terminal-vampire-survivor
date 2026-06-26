@@ -25,6 +25,7 @@ BuildState); the kill count from ``state.kills``.
 from __future__ import annotations
 
 from ..config import Config
+from ..meta.accrue import upgrade_cost
 from ..rules.leveling import Choice, xp_for_level
 
 # Width of each text bar in characters (a UI layout choice, not a Phase 0
@@ -112,21 +113,36 @@ def pause_overlay_lines() -> list[str]:
 
 
 def gameover_overlay_lines(state) -> list[str]:
-    """Return the game-over panel: run summary + restart/quit help (pure).
+    """Return the game-over panel: run summary + upgrade shop + restart/quit help.
 
     Reads the survival time, final level, and kill count from the read-only sim
-    state so the panel reflects how the run ended, and advertises the restart and
-    quit keys the loop's game-over mode accepts.
+    state so the panel reflects how the run ended, then lists the banked gold and
+    one numbered line per permanent upgrade (its next-level price, or MAX). The
+    loop's game-over mode turns the matching digit into a purchase; ``r`` restarts
+    and ``q`` quits. Pure -- returns strings only.
     """
     elapsed = state.elapsed
     minutes = int(elapsed) // 60
     seconds = int(elapsed) % 60
-    return [
+    lines = [
         "== GAME OVER ==",
         f"survived {minutes:02d}:{seconds:02d}",
         f"level {state.build.level}   kills {state.kills}",
-        "r: restart   q: quit",
+        f"gold {state.meta.gold}",
     ]
+    # Permanent-upgrade shop: one numbered line per upgrade (sorted for a stable
+    # digit->upgrade mapping the loop reuses). Press the digit to buy the next
+    # level on the game-over screen.
+    upgrades = state.cfg.defs.upgrades
+    for i, uid in enumerate(sorted(upgrades), start=1):
+        udef = upgrades[uid]
+        owned = state.meta.upgrades.get(uid, 0)
+        if owned >= udef.max_level:
+            lines.append(f"[{i}] {uid} MAX")
+        else:
+            lines.append(f"[{i}] {uid} Lv{owned} -> {upgrade_cost(udef, owned)}g")
+    lines.append("r: restart   q: quit")
+    return lines
 
 
 def overlay_lines(mode: str, state) -> list[str]:

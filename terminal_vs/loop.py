@@ -30,7 +30,7 @@ from dataclasses import replace
 from time import monotonic
 
 from .config import Config
-from .meta.accrue import RunResult, accrue_meta
+from .meta.accrue import RunResult, accrue_meta, spend_gold
 from .meta.save import DEFAULT_SAVE_PATH, load_meta, save_meta
 from .render.frame import render_frame
 from .rules import leveling
@@ -161,6 +161,23 @@ def _drain_levelups(state, cfg: Config, rng: random.Random) -> None:
     state.pending_choices = ()
 
 
+def _try_buy_upgrade(meta, key: str, cfg: Config):
+    """Map a game-over shop digit to a spend_gold purchase.
+
+    Returns the new ``MetaState`` if ``key`` is a digit naming an upgrade in the
+    sorted shop order (1-based), else ``None``. ``spend_gold`` itself no-ops when
+    the upgrade is maxed or unaffordable, so the returned meta may equal the input
+    -- the caller re-saves / repaints either way, which is harmless.
+    """
+    if not key.isdigit():
+        return None
+    idx = int(key) - 1
+    upgrade_ids = sorted(cfg.defs.upgrades)
+    if not 0 <= idx < len(upgrade_ids):
+        return None
+    return spend_gold(meta, upgrade_ids[idx], cfg.defs)
+
+
 def run(
     term, cfg: Config, rng: random.Random, sim=None, save_path=DEFAULT_SAVE_PATH
 ) -> None:
@@ -233,6 +250,9 @@ def run(
                 run_gold = sim.kills * cfg.defs.gold_per_kill
                 meta = accrue_meta(meta, RunResult(gold_earned=run_gold))
                 save_meta(meta, save_path)
+                # Mirror the banked meta onto the (now finished) sim so the
+                # game-over overlay's gold + shop reflect this run's earnings.
+                sim.meta = meta
             elif sim.level_up_pending:
                 mode = _MODE_LEVELUP
                 # Roll the draft once on entering levelup so the overlay has cards
@@ -297,3 +317,13 @@ def run(
                 last = monotonic()
                 accumulator = 0.0
                 render_frame(term, sim, sim.camera, cfg, max_hp, mode)
+            else:
+                # A shop digit buys a permanent upgrade with the banked gold;
+                # persist and repaint in place so the gold/shop lines update.
+                # Non-digit / out-of-range keys return None and are ignored.
+                bought = _try_buy_upgrade(meta, str(key), cfg)
+                if bought is not None:
+                    meta = bought
+                    save_meta(meta, save_path)
+                    sim.meta = meta
+                    render_frame(term, sim, sim.camera, cfg, max_hp, mode)

@@ -20,10 +20,12 @@ from dataclasses import replace
 
 from terminal_vs.loop import _drain_levelups, apply_draft_selection, run
 from terminal_vs.meta.save import load_meta
+from terminal_vs.meta.schema import MetaState
+from terminal_vs.rules.defs import MetaUpgradeDef
 from terminal_vs.rules.leveling import xp_for_level
 from terminal_vs.sim.state import new_run
 
-from .conftest import make_config
+from .conftest import make_config, make_defs
 
 
 class _FakeKey:
@@ -186,6 +188,27 @@ def test_gameover_banks_run_gold_to_the_save(tmp_path):
     saved = load_meta(save)
     assert saved.gold == 5 * cfg.defs.gold_per_kill
     assert saved.total_runs == 1
+
+
+def test_gameover_digit_key_buys_a_permanent_upgrade(tmp_path):
+    """A digit key on the game-over screen buys the matching upgrade with banked
+    gold and persists the new level + remaining gold."""
+    cfg = make_config(
+        defs=make_defs(
+            upgrades={"swift": MetaUpgradeDef("swift", 5, "move_speed", 1.1, 50, 1.5)}
+        )
+    )
+    rng = random.Random(0)
+    save = tmp_path / "meta.json"
+    sim = new_run(cfg, rng, meta=MetaState(gold=200))
+    sim.player.hp = 0.0  # trip game-over on the first poll
+    # "" trips game-over (no gold this run: 0 kills), "1" buys swift, "q" quits.
+    term = _FakeTerm([_FakeKey(""), _FakeKey("1"), _FakeKey("q")])
+    run(term, cfg, rng, sim=sim, save_path=save)
+
+    saved = load_meta(save)
+    assert saved.upgrades.get("swift") == 1  # one level bought
+    assert saved.gold == 200 - 50  # injected gold minus cost_base
 
 
 def test_pause_resume_repaints_a_play_frame(capsys):
