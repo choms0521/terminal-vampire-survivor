@@ -28,6 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from random import Random
 
+from ..meta.schema import MetaState
 from .defs import STARTING_WEAPON, BalanceDefs, EvolutionDef
 from .evolution import apply_evolution, eligible_evolutions
 
@@ -124,11 +125,17 @@ def level_up_pending(build: BuildState, defs: BalanceDefs) -> bool:
     return build.xp >= xp_for_level(build.level, defs)
 
 
-def effective_stats(build: BuildState, defs: BalanceDefs) -> Stats:
-    """Compute the multiplicative passive stats for ``build`` (single source).
+def effective_stats(
+    build: BuildState, defs: BalanceDefs, meta: MetaState | None = None
+) -> Stats:
+    """Compute the multiplicative stats for ``build`` (single source).
 
     Each owned passive multiplies its mapped stat once per level (product over
-    levels). Unknown passive ids (not in ``defs.passives``) are skipped. Pure.
+    levels). When a ``meta`` is given, its permanent (cross-run) upgrades multiply
+    the same stats ON TOP of the passives -- ``MetaUpgradeDef.stat`` names which
+    field -- so a permanent upgrade and an in-run passive on the same stat stack.
+    Unknown passive/upgrade ids (not in the defs) are skipped. ``meta=None`` (the
+    default) reproduces the pre-Phase-4 passive-only behavior. Pure.
     """
     attack_speed_mult = 1.0
     move_speed_mult = 1.0
@@ -144,6 +151,21 @@ def effective_stats(build: BuildState, defs: BalanceDefs) -> Stats:
             move_speed_mult *= factor
         elif name == _MAGNET:
             magnet_mult *= factor
+    # Permanent upgrades multiply the same stats on top of the passives. Folded in
+    # sorted order for determinism (upgrades is a Mapping, not an ordered tuple
+    # like passive_levels), so the float product is reproducible run to run.
+    if meta is not None:
+        for uid, level in sorted(meta.upgrades.items()):
+            udef = defs.upgrades.get(uid)
+            if udef is None or level <= 0:
+                continue
+            factor = udef.multiplier_per_level ** level
+            if udef.stat == _ATTACK_SPEED:
+                attack_speed_mult *= factor
+            elif udef.stat == _MOVE_SPEED:
+                move_speed_mult *= factor
+            elif udef.stat == _MAGNET:
+                magnet_mult *= factor
     return Stats(
         attack_speed_mult=attack_speed_mult,
         move_speed_mult=move_speed_mult,
