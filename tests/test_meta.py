@@ -11,9 +11,12 @@ import json
 
 import pytest
 
-from terminal_vs.meta.accrue import RunResult, accrue_meta
+from terminal_vs.meta.accrue import RunResult, accrue_meta, spend_gold, upgrade_cost
 from terminal_vs.meta.save import CURRENT_VERSION, load_meta, save_meta
 from terminal_vs.meta.schema import MetaSaveError, MetaState
+from terminal_vs.rules.defs import MetaUpgradeDef
+
+from .conftest import make_defs
 
 
 def test_roundtrip_preserves_all_fields(tmp_path):
@@ -127,3 +130,59 @@ def test_accrue_result_survives_save_round_trip(tmp_path):
 def test_run_result_rejects_negative_gold():
     with pytest.raises(ValueError):
         RunResult(gold_earned=-1)
+
+
+# --- spend_gold: the pure permanent-upgrade purchase --------------------------
+
+
+def _defs_with_swift(*, max_level=5, cost_base=50, cost_growth=2.0):
+    return make_defs(
+        upgrades={
+            "swift": MetaUpgradeDef(
+                "swift", max_level, "move_speed", 1.1, cost_base, cost_growth
+            )
+        }
+    )
+
+
+def test_upgrade_cost_is_geometric_in_owned_level():
+    udef = MetaUpgradeDef("swift", 5, "move_speed", 1.1, 50, 2.0)
+    assert upgrade_cost(udef, 0) == 50  # base price for the first level
+    assert upgrade_cost(udef, 1) == 100  # base * growth
+    assert upgrade_cost(udef, 2) == 200
+
+
+def test_spend_gold_buys_one_level_and_deducts_cost():
+    new = spend_gold(MetaState(gold=100), "swift", _defs_with_swift())
+    assert new.upgrades["swift"] == 1
+    assert new.gold == 50  # 100 - cost_base(50)
+
+
+def test_spend_gold_cost_grows_with_owned_level():
+    new = spend_gold(
+        MetaState(gold=1000, upgrades={"swift": 1}), "swift", _defs_with_swift()
+    )
+    assert new.upgrades["swift"] == 2
+    assert new.gold == 900  # next level costs 50 * 2**1 = 100
+
+
+def test_spend_gold_insufficient_funds_is_noop():
+    meta = MetaState(gold=10)
+    assert spend_gold(meta, "swift", _defs_with_swift()) == meta
+
+
+def test_spend_gold_at_max_level_is_noop():
+    meta = MetaState(gold=10_000, upgrades={"swift": 2})
+    assert spend_gold(meta, "swift", _defs_with_swift(max_level=2)) == meta
+
+
+def test_spend_gold_unknown_upgrade_raises_keyerror():
+    with pytest.raises(KeyError):
+        spend_gold(MetaState(gold=100), "ghost", make_defs())
+
+
+def test_spend_gold_does_not_mutate_old_meta():
+    old = MetaState(gold=100)
+    spend_gold(old, "swift", _defs_with_swift())
+    assert old.gold == 100
+    assert dict(old.upgrades) == {}
