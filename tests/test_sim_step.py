@@ -386,3 +386,24 @@ def test_meta_move_speed_upgrade_makes_the_player_faster():
         step(base, intent, cfg, random.Random(0))
         step(boosted, intent, cfg, random.Random(0))
     assert boosted.player.x > base.player.x  # 1.5x move_speed -> farther in x
+
+
+def test_same_seed_same_meta_yields_identical_end_state():
+    """A run is determined by (seed + injected MetaState): two runs with the same
+    seed and the same meta produce a byte-identical end snapshot -- the run-level
+    determinism guarantee with a permanent upgrade in play."""
+    cfg = make_config(
+        defs=make_defs(
+            upgrades={"swift": MetaUpgradeDef("swift", 5, "move_speed", 1.1, 50, 1.5)}
+        )
+    )
+    meta = MetaState(gold=100, upgrades={"swift": 2})
+
+    def play():
+        state = new_run(cfg, random.Random(7), meta=meta)
+        rng = random.Random(7)
+        for _ in range(80):
+            step(state, Intent(1, 0), cfg, rng)
+        return _snapshot(state)
+
+    assert play() == play()

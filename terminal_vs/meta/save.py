@@ -12,6 +12,7 @@ future schema change can migrate old saves instead of silently mis-reading them.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from .schema import MetaSaveError, MetaState
@@ -38,9 +39,16 @@ def save_meta(state: MetaState, path: Path = DEFAULT_SAVE_PATH) -> None:
         "total_runs": state.total_runs,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    # Atomic write: serialize to a temp file in the same dir, then os.replace it
+    # over the target (atomic on POSIX and Windows). A crash mid-write can only
+    # leave the .tmp behind, never a truncated meta.json -- load_meta raises on a
+    # partial file and the loop loads the save unguarded at startup, so a
+    # half-written save would otherwise brick the next launch.
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(
         json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
     )
+    os.replace(tmp, path)
 
 
 def load_meta(path: Path = DEFAULT_SAVE_PATH) -> MetaState:
