@@ -168,6 +168,30 @@ def test_missing_starting_weapon_raises(tmp_path):
     assert "config/balance.toml" in msg
 
 
+def test_orbit_ttl_not_less_than_cooldown_raises(tmp_path):
+    """An orbit weapon needs projectile_ttl < cooldown so its ring respawns each
+    cooldown (which restores the per-life hit_ids re-hit cadence). A ttl >= cooldown
+    is rejected at load, matching how this config enforces other load-bearing
+    balance couplings."""
+    orbit_block = (
+        "\n[weapons.orbit]\n"
+        "max_level = 8\n"
+        "cooldown = 2.0\n"
+        "damage = 6.0\n"
+        "projectile_count = 3\n"
+        "projectile_speed = 0.0\n"
+        "projectile_ttl = 2.5\n"  # >= cooldown -> must be rejected
+        'targeting = "orbit"\n'
+        "orbit_radius = 4.0\n"
+        "orbit_angular_speed = 3.0\n"
+    )
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + orbit_block)
+    msg = str(exc.value)
+    assert "projectile_ttl" in msg
+    assert "cooldown" in msg
+
+
 def test_missing_key_falls_back_to_default(tmp_path):
     """A weapon entry missing keys falls back to code defaults for those keys."""
     # dagger present but only declares cooldown; the rest fall back.

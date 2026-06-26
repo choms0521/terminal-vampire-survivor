@@ -211,3 +211,17 @@ def test_shipped_config_loads_and_validates():
     minutes = [step.minute for step in cfg.defs.director.reinforce_steps]
     assert minutes  # non-empty
     assert minutes == sorted(minutes)
+
+    # The new weapon render / fan / melee-effect fields parse from the SHIPPED
+    # balance.toml (conftest mirrors these by hand, so this pins the real data
+    # against drift between the mirror and the production config).
+    weapons = cfg.defs.weapons
+    assert weapons["dagger"].glyph == "-"
+    assert weapons["dagger"].color == "white"
+    assert weapons["magic_bolt"].color == "cyan"
+    assert weapons["dagger_evolved"].spread_angle == 30.0  # the 3-dart fan cone
+    assert weapons["swing"].effect_ttl == 0.15  # the swing-visual lifetime
+    assert weapons["lance"].pierce == 99  # lance pierces a whole line
+    assert weapons["nova"].targeting == "radial"  # nova is the 360-deg burst
+    assert weapons["orbit"].targeting == "orbit"  # orbit revolves around the player
+    assert weapons["orbit"].orbit_radius == 4.0  # the ring radius

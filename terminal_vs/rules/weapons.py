@@ -8,7 +8,7 @@ a :class:`WeaponFireResult` value -- the projectiles or instant hits to spawn an
 the updated cooldown. It never mutates its inputs and never touches buffers; the
 sim layer (Chunk 2) applies the result in place.
 
-Three targeting strategies (selected by ``weapon_def.targeting``):
+Five targeting strategies (selected by ``weapon_def.targeting``):
 
   * ``"nearest"``            - one projectile salvo aimed at the nearest enemy.
   * ``"nearest_or_random"``  - aim at the nearest enemy; distance ties are broken
@@ -16,6 +16,13 @@ Three targeting strategies (selected by ``weapon_def.targeting``):
                                (deterministic for a fixed seed).
   * ``"forward_arc"``        - melee: instant hits on every enemy inside a forward
                                arc in front of the player's facing direction.
+  * ``"radial"``             - a 360-degree burst around the player (crowd-clear
+                               nova), independent of any target; fires only when
+                               at least one enemy is present.
+  * ``"orbit"``              - projectiles revolve around the player as an aura
+                               (the sim moves them on a ring); ttl-bounded and
+                               respawned each cooldown. Fires only when an enemy
+                               is present.
 
 Determinism: aspect distance uses :func:`terminal_vs.world.sq_dist_aspect_x` (the
 single on-screen-distance definition) with ``ctx.aspect_x``, and the "nearest"
@@ -26,7 +33,7 @@ blessed, no global state, no Chinese characters.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import hypot
+from math import acos, cos, hypot, pi, radians, sin
 from random import Random
 
 from ..world import sq_dist_aspect_x
@@ -55,6 +62,12 @@ class ProjectileSpec:
     damage: float
     ttl: float
     pierce: int = 0
+    # Orbit fields (radius 0 = a normal straight projectile). When orbit_radius >
+    # 0 the sim ignores vx/vy and revolves the projectile around the player at
+    # orbit_angular_speed, starting from orbit_angle (an orbiting aura weapon).
+    orbit_radius: float = 0.0
+    orbit_angle: float = 0.0
+    orbit_angular_speed: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -68,6 +81,23 @@ class InstantHitSpec:
 
     target_id: int
     damage: float
+
+
+@dataclass(frozen=True)
+class EffectSpec:
+    """Frozen visual-only effect marker (the pure result of a fire).
+
+    Absolute world position + glyph/color + ttl. The sim builds a mutable
+    ``Effect`` entity from it; the value itself is immutable and crosses the
+    rules/sim boundary read-only. Purely cosmetic -- no damage, no id, no
+    collision (e.g. the melee swing arc that makes a forward_arc hit visible).
+    """
+
+    x: float
+    y: float
+    glyph: str
+    color: str
+    ttl: float
 
 
 @dataclass(frozen=True)
@@ -105,6 +135,7 @@ class WeaponFireResult:
     new_cooldown: float
     projectiles: tuple[ProjectileSpec, ...] = ()
     instant_hits: tuple[InstantHitSpec, ...] = ()
+    effects: tuple[EffectSpec, ...] = ()
 
 
 def _select_target(ctx: FireContext, rng: Random) -> tuple[int, float, float] | None:
@@ -148,11 +179,15 @@ def _make_projectiles(
 ) -> tuple[ProjectileSpec, ...]:
     """Build the projectile salvo aimed from the player at ``target``.
 
-    The direction is the plain Euclidean unit vector from player to target (a
-    projectile travels in real world space; aspect correction is screen-only),
-    scaled to the weapon's projectile speed. ``projectile_count`` shots and the
-    weapon's ``pierce`` are honored. Degenerate case: a target coinciding with
-    the player launches along +X, avoiding divide-by-zero on normalization.
+    The aim direction is the plain Euclidean angle from player to target (a
+    projectile travels in real world space; aspect correction is screen-only).
+    ``projectile_count`` shots are fanned evenly across ``spread_angle`` (total
+    cone in degrees) centered on that aim, so a multi-shot weapon visibly spreads
+    instead of stacking every shot on one line. A single shot -- or a weapon with
+    ``spread_angle == 0`` -- fires straight at the target (the historical
+    behavior, preserved for backward compatibility). The weapon's ``pierce`` is
+    honored on every shot. Degenerate case: a target coinciding with the player
+    aims along +X, avoiding a meaningless angle from a zero vector.
     """
     weapon = ctx.weapon_def
     px, py = ctx.player_pos
@@ -161,21 +196,108 @@ def _make_projectiles(
     dy = ty - py
     dist = hypot(dx, dy)
     if dist == 0.0:
-        vx = weapon.projectile_speed
-        vy = 0.0
+        ux, uy = 1.0, 0.0  # degenerate: target on the player -> aim +X
     else:
-        scale = weapon.projectile_speed / dist
-        vx = dx * scale
-        vy = dy * scale
-    spec = ProjectileSpec(
-        vx=vx,
-        vy=vy,
-        damage=weapon.damage,
-        ttl=weapon.projectile_ttl,
-        pierce=weapon.pierce,
-    )
+        ux, uy = dx / dist, dy / dist
+    speed = weapon.projectile_speed
+    spread = radians(weapon.spread_angle)
     count = max(1, weapon.projectile_count)
-    return tuple(spec for _ in range(count))
+
+    specs: list[ProjectileSpec] = []
+    for i in range(count):
+        # Even fan: shot i sits at angle -spread/2 + i*(spread/(count-1)) off the
+        # aim. One shot (or zero spread) -> offset 0 -> the rotation is the
+        # identity, so the velocity is mathematically identical to the old
+        # straight-at-target shot (speed * unit aim) -- it differs only by ~1 ulp
+        # of floating-point reassociation (old dx*(speed/dist) vs speed*(dx/dist)).
+        # Rotating the unit aim avoids an atan2 round-trip.
+        offset = 0.0 if count == 1 else -spread / 2.0 + spread * i / (count - 1)
+        c = cos(offset)
+        s = sin(offset)
+        rx = ux * c - uy * s
+        ry = ux * s + uy * c
+        specs.append(
+            ProjectileSpec(
+                vx=speed * rx,
+                vy=speed * ry,
+                damage=weapon.damage,
+                ttl=weapon.projectile_ttl,
+                pierce=weapon.pierce,
+            )
+        )
+    return tuple(specs)
+
+
+def _make_radial(ctx: FireContext) -> tuple[ProjectileSpec, ...]:
+    """Build a 360-degree burst centered on the player (a crowd-clear nova).
+
+    Independent of any target: ``projectile_count`` shots are spaced evenly at
+    ``i * 2*pi / count`` from a fixed base angle (0), so the burst is symmetric
+    and trivially reproducible (no rng, no facing). This is a SEPARATE function
+    from the fan ``_make_projectiles`` on purpose: the fan formula
+    ``-spread/2 + spread*i/(count-1)`` would double-cover at a full 360 deg (the
+    first and last shot coincide), whereas ``i * 2*pi / count`` tiles the circle
+    exactly once. The weapon's ``pierce`` is honored on every shot.
+    """
+    weapon = ctx.weapon_def
+    speed = weapon.projectile_speed
+    count = max(1, weapon.projectile_count)
+    specs: list[ProjectileSpec] = []
+    for i in range(count):
+        angle = i * (2.0 * pi / count)
+        specs.append(
+            ProjectileSpec(
+                vx=speed * cos(angle),
+                vy=speed * sin(angle),
+                damage=weapon.damage,
+                ttl=weapon.projectile_ttl,
+                pierce=weapon.pierce,
+            )
+        )
+    return tuple(specs)
+
+
+def _make_orbit(ctx: FireContext) -> tuple[ProjectileSpec, ...]:
+    """Build an orbiting ring: ``projectile_count`` shots circling the player.
+
+    Each shot starts at angle ``i * 2*pi / count`` and revolves at
+    ``orbit_angular_speed``; the sim places and moves it on the ring (``vx``/``vy``
+    are 0 -- orbit motion is not linear velocity).
+
+    CRITICAL coupling: orbit is ttl-bounded and RESPAWNED each cooldown. A
+    ``Projectile.hit_ids`` guard lets a single orbit life damage each enemy only
+    ONCE; respawning each cooldown is what restores the re-hit cadence (every new
+    life starts with an empty ``hit_ids``). Making orbit persistent (no respawn)
+    would silently turn it into a one-hit cosmetic ring -- so the
+    ``projectile_ttl < cooldown`` relationship in balance.toml is load-bearing,
+    not incidental. ``pierce`` must be large so one life sweeps many enemies.
+    """
+    weapon = ctx.weapon_def
+    count = max(1, weapon.projectile_count)
+    specs: list[ProjectileSpec] = []
+    for i in range(count):
+        angle = i * (2.0 * pi / count)
+        specs.append(
+            ProjectileSpec(
+                vx=0.0,
+                vy=0.0,
+                damage=weapon.damage,
+                # Scale ttl by the SAME attack_speed factor that tick_weapon
+                # applies to the cooldown reset (cooldown * attack_speed_mult), so
+                # the load-time ``ttl < cooldown`` ratio is preserved at every
+                # passive level. Without this, the attack_speed passive (< 1)
+                # shrinks the effective cooldown below the fixed ttl, letting a
+                # new ring spawn before the previous one expires -- the rings stack
+                # and damage inflates. Orbit-only: a straight projectile's ttl is
+                # flight lifetime and must not shrink with attack speed.
+                ttl=weapon.projectile_ttl * ctx.attack_speed_mult,
+                pierce=weapon.pierce,
+                orbit_radius=weapon.orbit_radius,
+                orbit_angle=angle,
+                orbit_angular_speed=weapon.orbit_angular_speed,
+            )
+        )
+    return tuple(specs)
 
 
 def _make_forward_arc_hits(ctx: FireContext) -> tuple[InstantHitSpec, ...]:
@@ -218,6 +340,46 @@ def _make_forward_arc_hits(ctx: FireContext) -> tuple[InstantHitSpec, ...]:
     return tuple(hits)
 
 
+def _make_swing_effects(ctx: FireContext) -> tuple[EffectSpec, ...]:
+    """Build the visual swing arc for a forward_arc (melee) fire.
+
+    A melee swing deals instant damage with no projectile, so without this it is
+    invisible. Place the weapon's glyph at ``arc_range`` in RAW world space (the
+    same space the hit test uses) at angles spanning the cone -- the cone
+    half-angle is ``acos(arc_half_width)`` (the same cosine threshold
+    :func:`_make_forward_arc_hits` compares against) -- so the drawn arc honestly
+    marks where the swing reaches. The glyphs are cosmetic; the sim gives them a
+    short ttl and draws them under the player. Defaults to facing +X when the
+    player has not moved yet, so the arc is always well-defined.
+    """
+    weapon = ctx.weapon_def
+    px, py = ctx.player_pos
+    fx, fy = ctx.player_facing
+    facing_len = hypot(fx, fy)
+    if facing_len == 0.0:
+        fx, fy, facing_len = 1.0, 0.0, 1.0
+    ux, uy = fx / facing_len, fy / facing_len
+    # Cone half-angle from the cosine half-width (clamped for safety against fp
+    # drift pushing the argument just outside [-1, 1]).
+    half = acos(max(-1.0, min(1.0, weapon.arc_half_width)))
+    specs: list[EffectSpec] = []
+    for angle in (-half, 0.0, half):
+        c = cos(angle)
+        s = sin(angle)
+        rx = ux * c - uy * s
+        ry = ux * s + uy * c
+        specs.append(
+            EffectSpec(
+                x=px + rx * weapon.arc_range,
+                y=py + ry * weapon.arc_range,
+                glyph=weapon.glyph,
+                color=weapon.color,
+                ttl=weapon.effect_ttl,
+            )
+        )
+    return tuple(specs)
+
+
 def tick_weapon(
     cooldown_remaining: float, ctx: FireContext, rng: Random
 ) -> WeaponFireResult:
@@ -251,7 +413,29 @@ def tick_weapon(
         if not hits:
             return WeaponFireResult(fired=False, new_cooldown=_READY_IDLE_COOLDOWN)
         return WeaponFireResult(
-            fired=True, new_cooldown=reset, instant_hits=hits
+            fired=True,
+            new_cooldown=reset,
+            instant_hits=hits,
+            effects=_make_swing_effects(ctx),
+        )
+
+    if ctx.weapon_def.targeting == "radial":
+        # Crowd-clear nova: a 360-deg burst, fired only when there is something to
+        # clear (no enemies -> stay ready/idle, mirroring the empty-target path).
+        if not ctx.enemy_positions:
+            return WeaponFireResult(fired=False, new_cooldown=_READY_IDLE_COOLDOWN)
+        return WeaponFireResult(
+            fired=True, new_cooldown=reset, projectiles=_make_radial(ctx)
+        )
+
+    if ctx.weapon_def.targeting == "orbit":
+        # Orbiting aura: spawn a fresh ring (ttl-bounded; respawn each cooldown is
+        # what restores the re-hit cadence -- see _make_orbit). Like radial, fire
+        # only when there is something to defend against (no enemies -> idle).
+        if not ctx.enemy_positions:
+            return WeaponFireResult(fired=False, new_cooldown=_READY_IDLE_COOLDOWN)
+        return WeaponFireResult(
+            fired=True, new_cooldown=reset, projectiles=_make_orbit(ctx)
         )
 
     target = _select_target(ctx, rng)

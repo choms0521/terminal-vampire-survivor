@@ -40,6 +40,8 @@ projectile_count = 1
 projectile_speed = 14.0
 projectile_ttl   = 1.2
 targeting        = "nearest"
+glyph            = "-"        # fast straight dart
+color            = "white"
 
 [weapons.magic_bolt]
 max_level        = 8
@@ -49,6 +51,8 @@ projectile_count = 1
 projectile_speed = 10.0
 projectile_ttl   = 1.6
 targeting        = "nearest_or_random"
+glyph            = "*"        # arcane bolt
+color            = "cyan"
 
 [weapons.swing]
 max_level        = 8
@@ -60,6 +64,9 @@ projectile_ttl   = 0.0
 targeting        = "forward_arc"
 arc_range        = 5.0    # world-unit reach of the swing in front of the player
 arc_half_width   = 0.3    # cosine half-width: 0 = 180 deg (hemisphere), 1 = 0 deg (ray only), 0.3 ~= 72 deg cone
+glyph            = ")"        # melee swing arc (drawn by the swing effect, stage 3)
+color            = "red"
+effect_ttl       = 0.15       # swing-visual lifetime in seconds (a few ticks)
 
 # Evolution result weapon. Replaces dagger when the evolution applies. max_level
 # is 1 (evolved weapons are terminal in Phase 2). It pierces multiple enemies.
@@ -72,6 +79,52 @@ projectile_speed = 18.0
 projectile_ttl   = 1.2
 targeting        = "nearest"
 pierce           = 4
+glyph            = ">"        # piercing evolved dart (fan of 3, stage 2)
+color            = "yellow"
+spread_angle     = 30.0       # fan the 3 darts across a 30 deg cone
+
+# Lance: a fast, far-reaching dart that pierces a whole line of enemies. Data-only
+# (no new targeting code): "nearest" + high pierce + high speed + long ttl.
+[weapons.lance]
+max_level        = 8
+cooldown         = 1.5
+damage           = 14.0
+projectile_count = 1
+projectile_speed = 26.0    # fast: a long thrown lance
+projectile_ttl   = 1.6     # long range
+targeting        = "nearest"
+pierce           = 99      # passes through a whole line (collision is 1 enemy/tick)
+glyph            = "="
+color            = "green"
+
+# Nova: a 360-degree burst around the player for crowd control (targeting "radial").
+[weapons.nova]
+max_level        = 8
+cooldown         = 2.2
+damage           = 7.0
+projectile_count = 8       # 8 shots spaced 45 deg apart around the player
+projectile_speed = 9.0
+projectile_ttl   = 1.0
+targeting        = "radial"
+glyph            = "o"
+color            = "magenta"
+
+# Orbit: a defensive aura of glyphs that revolve around the player (targeting
+# "orbit"). ttl-bounded and respawned each cooldown -- the projectile_ttl < cooldown
+# relationship is load-bearing (it restores the per-life hit_ids re-hit cadence).
+[weapons.orbit]
+max_level           = 8
+cooldown            = 3.0    # respawn cadence -> the re-hit cadence
+damage              = 6.0
+projectile_count    = 3      # 3 orbiting glyphs, evenly spaced on the ring
+projectile_speed    = 0.0    # orbit uses angular speed, not linear velocity
+projectile_ttl      = 2.8    # < cooldown so the ring respawns before it lapses
+targeting           = "orbit"
+pierce              = 99     # one life sweeps many distinct enemies (hit_ids guards re-hit)
+orbit_radius        = 4.0    # ring radius in world units
+orbit_angular_speed = 3.0    # revolution speed (radians / second)
+glyph               = "O"
+color               = "cyan"
 
 # Passives. Each multiplies a single stat per owned level (product over levels).
 #   attack_speed -> cooldown multiplier (< 1 makes weapons fire faster)

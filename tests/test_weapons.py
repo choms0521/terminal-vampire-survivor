@@ -217,3 +217,137 @@ def test_nearest_or_random_tie_order_independent():
         result_rev.projectiles[0].vx,
         result_rev.projectiles[0].vy,
     ), "same seed must hit same target regardless of enemy buffer order"
+
+
+def test_multishot_fans_projectiles_across_the_spread():
+    """A multi-shot weapon fans its shots across spread_angle instead of stacking
+    them on one line: dagger_evolved (count 3, spread 30 deg) fires three darts at
+    distinct angles, the middle one dead-on the target, all at the same speed."""
+    # Target straight along +X so the fan spreads symmetrically in Y.
+    ctx = _ctx(weapon="dagger_evolved", enemies=((0, 5.0, 0.0),), dt=1.0)
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    assert result.fired is True
+    specs = result.projectiles
+    assert len(specs) == 3  # projectile_count darts
+
+    speed = 18.0  # dagger_evolved projectile_speed; only DIRECTION differs per shot
+    for s in specs:
+        assert abs(hypot(s.vx, s.vy) - speed) < 1e-9
+    # The shots fan out: their Y velocities are strictly distinct (not stacked).
+    vys = sorted(s.vy for s in specs)
+    assert vys[0] < vys[1] < vys[2]
+    # Symmetric about the +X aim: middle dart straight, outer two mirror in Y.
+    assert abs(vys[1]) < 1e-9            # middle dart dead-on the target
+    assert abs(vys[0] + vys[2]) < 1e-9   # outer darts mirror in Y
+    assert all(s.vx > 0.0 for s in specs)  # all still travel toward the target
+
+
+def test_zero_spread_stacks_multishot_backward_compatible():
+    """A multi-shot weapon with spread_angle == 0 stacks every shot on the aim line
+    (the pre-fan behavior), so weapon data without a spread is unchanged."""
+    from dataclasses import replace
+
+    defs = make_defs()
+    stacked = replace(defs.weapons["dagger_evolved"], spread_angle=0.0)
+    ctx = FireContext(
+        player_pos=(0.0, 0.0),
+        player_facing=(1.0, 0.0),
+        enemy_positions=((0, 5.0, 0.0),),
+        weapon_def=stacked,
+        attack_speed_mult=1.0,
+        dt=1.0,
+        aspect_x=2.0,
+    )
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    specs = result.projectiles
+    assert len(specs) == 3
+    # Zero spread -> every dart identical (stacked on the aim line).
+    assert all((s.vx, s.vy) == (specs[0].vx, specs[0].vy) for s in specs)
+
+
+def test_swing_fire_returns_visual_effects_in_front():
+    """A forward_arc (swing) fire returns visual effect markers in front of the
+    player so the melee swing is visible (it deals instant damage with no
+    projectile). The markers carry the weapon's glyph/color and a positive ttl."""
+    # Facing +X with an enemy in the arc so the swing fires.
+    ctx = _ctx(weapon="swing", enemies=((0, 3.0, 0.0),), facing=(1.0, 0.0), dt=1.0)
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    assert result.fired is True
+    assert result.effects != ()  # the swing arc is drawn
+    for e in result.effects:
+        assert e.x > 0.0          # placed forward of the player (+X facing)
+        assert e.glyph == ")"     # the swing weapon's glyph
+        assert e.color == "red"   # the swing weapon's color
+        assert e.ttl > 0.0        # lives long enough to be rendered
+
+
+def test_projectile_weapons_return_no_visual_effects():
+    """nearest / nearest_or_random weapons carry their visual in the projectile
+    itself, so they return no separate effect markers."""
+    ctx = _ctx(weapon="dagger", enemies=((0, 3.0, 0.0),), dt=1.0)
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    assert result.fired is True
+    assert result.effects == ()
+
+
+def test_radial_nova_fires_evenly_around_the_player():
+    """A radial (nova) weapon fires projectile_count shots tiling the full circle
+    once, independent of any target's bearing, all at the weapon's speed."""
+    from math import atan2, isclose, pi
+
+    # The enemy's position is irrelevant to a radial burst (it fires a full ring).
+    ctx = _ctx(weapon="nova", enemies=((0, 3.0, 0.0),), dt=1.0)
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    assert result.fired is True
+    specs = result.projectiles
+    assert len(specs) == 8  # projectile_count
+
+    speed = 9.0  # nova projectile_speed; only the bearing differs per shot
+    for s in specs:
+        assert isclose(hypot(s.vx, s.vy), speed, rel_tol=1e-9)
+    # Bearings tile the circle exactly once: i * 2*pi/8 from base angle 0.
+    angles = sorted(atan2(s.vy, s.vx) % (2 * pi) for s in specs)
+    expected = sorted((i * 2 * pi / 8) % (2 * pi) for i in range(8))
+    for got, want in zip(angles, expected):
+        assert isclose(got, want, abs_tol=1e-9)
+
+
+def test_radial_nova_stays_idle_with_no_enemies():
+    """A radial weapon stays ready/idle when no enemy is present (it fires only to
+    clear a crowd), so it does not waste a burst into an empty field."""
+    ctx = _ctx(weapon="nova", enemies=(), dt=1.0)
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    assert result.fired is False
+    assert result.new_cooldown == 0.0  # ready to retry next tick
+    assert result.projectiles == ()
+
+
+def test_orbit_returns_a_ring_of_orbiting_specs():
+    """An orbit weapon returns projectile_count specs carrying the ring radius and
+    angular speed, with initial angles tiling the circle once and zero linear
+    velocity (the sim moves them on the ring, not by vx/vy)."""
+    from math import isclose, pi
+
+    ctx = _ctx(weapon="orbit", enemies=((0, 3.0, 0.0),), dt=1.0)
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    assert result.fired is True
+    specs = result.projectiles
+    assert len(specs) == 3  # projectile_count orbiting glyphs
+
+    for s in specs:
+        assert (s.vx, s.vy) == (0.0, 0.0)  # orbit motion is not linear velocity
+        assert s.orbit_radius == 4.0  # the ring radius
+        assert s.orbit_angular_speed == 3.0  # it revolves
+    # Initial angles tile the circle exactly once: i * 2*pi/3.
+    angles = sorted(s.orbit_angle for s in specs)
+    expected = sorted((i * 2 * pi / 3) for i in range(3))
+    for got, want in zip(angles, expected):
+        assert isclose(got, want, abs_tol=1e-9)
+
+
+def test_orbit_stays_idle_with_no_enemies():
+    """Orbit fires (spawns its ring) only when an enemy is present."""
+    ctx = _ctx(weapon="orbit", enemies=(), dt=1.0)
+    result = tick_weapon(cooldown_remaining=0.0, ctx=ctx, rng=random.Random(0))
+    assert result.fired is False
+    assert result.projectiles == ()

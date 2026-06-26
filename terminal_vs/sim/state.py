@@ -177,6 +177,9 @@ class Projectile:
         pierce: int = 0,
         glyph: str = "*",
         color: str = "yellow",
+        orbit_radius: float = 0.0,
+        orbit_angle: float = 0.0,
+        orbit_angular_speed: float = 0.0,
     ) -> None:
         self.id: int = entity_id
         self.x: float = x
@@ -189,6 +192,12 @@ class Projectile:
         self.pierce: int = pierce
         self.glyph: str = glyph
         self.color: str = color
+        # Orbit motion (radius 0 = a normal straight projectile). When
+        # orbit_radius > 0 the sim ignores vx/vy and revolves this projectile
+        # around the player at orbit_angular_speed from the current orbit_angle.
+        self.orbit_radius: float = orbit_radius
+        self.orbit_angle: float = orbit_angle
+        self.orbit_angular_speed: float = orbit_angular_speed
         # Fresh set per projectile -- NEVER use a mutable default argument here.
         self.hit_ids: set[int] = set()
 
@@ -214,6 +223,31 @@ class Pickup:
         self.team: str = "pickup"
         self.glyph: str = glyph
         self.color: str = color
+
+
+class Effect:
+    """Mutable visual-only effect marker (e.g. a melee swing arc glyph).
+
+    Purely cosmetic: it carries a render glyph/color and a ``ttl`` that counts
+    down each tick, with NO damage, NO collision, and NO id (it has no identity
+    and never interacts, so it does not consume ``next_id``). The render layer
+    draws it like any entity (duck-typed ``x`` / ``y`` / ``glyph`` / ``color``);
+    step decrements ``ttl`` and cleanup drops it once it expires.
+    """
+
+    def __init__(
+        self,
+        x: float,
+        y: float,
+        glyph: str = "*",
+        color: str = "white",
+        ttl: float = 0.0,
+    ) -> None:
+        self.x: float = x
+        self.y: float = y
+        self.glyph: str = glyph
+        self.color: str = color
+        self.ttl: float = ttl
 
 
 class SimState:
@@ -252,6 +286,7 @@ class SimState:
         self.player: Player
         self.enemies: list[Enemy] = []
         self.projectiles: list[Projectile] = []
+        self.effects: list[Effect] = []
         self.pickups: list[Pickup] = []
         self.camera: Camera = Camera(0.0, 0.0)
         self.build: BuildState = BuildState()

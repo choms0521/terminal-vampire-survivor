@@ -44,6 +44,11 @@ class WeaponDef:
     ``"forward_arc"`` resolves instant hits. ``pierce`` is how many enemies a
     projectile passes through (0 = stop on first hit); evolved weapons set it.
     The arc fields are only meaningful for ``"forward_arc"`` weapons.
+
+    ``glyph`` / ``color`` are render hints stamped onto the projectiles (or the
+    melee swing effect) this weapon fires, so each weapon reads distinctly on
+    screen. They default to the historical projectile look (``*`` / ``yellow``)
+    so a weapon that omits them keeps the prior appearance.
     """
 
     name: str
@@ -57,6 +62,14 @@ class WeaponDef:
     pierce: int = 0          # enemies a projectile passes through (0 = none)
     arc_range: float = 0.0       # forward_arc reach in world units
     arc_half_width: float = 0.0  # forward_arc cosine half-width (1 = forward only)
+    glyph: str = "*"         # render glyph for this weapon's projectile / effect
+    color: str = "yellow"    # render color for this weapon's projectile / effect
+    spread_angle: float = 0.0  # total fan angle (deg) across multi-shot; 0 = stacked
+    effect_ttl: float = 0.0    # forward_arc swing visual lifetime (sec); must
+    # exceed one tick (1 / sim_tps) to ever render -- it is created and aged the
+    # same tick, so a ttl <= dt is culled before any frame draws it (0 = no effect).
+    orbit_radius: float = 0.0         # orbit ring radius (world units); 0 = not an orbit
+    orbit_angular_speed: float = 0.0  # orbit revolution speed (radians / second)
 
 
 @dataclass(frozen=True)
@@ -218,6 +231,12 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
             pierce=int(w.get("pierce", 0)),
             arc_range=float(w.get("arc_range", 0.0)),
             arc_half_width=float(w.get("arc_half_width", 0.0)),
+            glyph=str(w.get("glyph", "*")),
+            color=str(w.get("color", "yellow")),
+            spread_angle=float(w.get("spread_angle", 0.0)),
+            effect_ttl=float(w.get("effect_ttl", 0.0)),
+            orbit_radius=float(w.get("orbit_radius", 0.0)),
+            orbit_angular_speed=float(w.get("orbit_angular_speed", 0.0)),
         )
         for name, w in weapons_raw.items()
     }

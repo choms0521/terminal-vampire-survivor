@@ -37,6 +37,22 @@ from terminal_vs.rules.leveling import (
 
 from .conftest import make_defs
 
+# This AC7 test pins exact fixed-seed builds over the PHASE 2 weapon set. Later
+# stages add weapons to the default pool (lance / nova / orbit, ...); without
+# pinning the pool here, every new draftable weapon would perturb these seeds and
+# break the pinned builds for reasons unrelated to the divergence thesis. So the
+# driver uses make_defs restricted to the Phase 2 weapons -- the content this AC
+# was written against (master plan section 7 Day 7).
+_PHASE2_WEAPONS = ("dagger", "magic_bolt", "swing", "dagger_evolved")
+
+
+def _phase2_defs():
+    """make_defs with its weapon pool restricted to the Phase 2 set (see above)."""
+    full = make_defs()
+    weapons = {name: full.weapons[name] for name in _PHASE2_WEAPONS}
+    return make_defs(weapons=weapons)
+
+
 # A path preference / hard-skip is an ordered list of (kind, target) matchers.
 # ``target=None`` matches any target of that kind.
 _Matcher = tuple[str, str | None]
@@ -122,7 +138,7 @@ def _drive_path(
     set, the drive halts as soon as the build can evolve (used to assert
     eligibility with the base weapon still owned).
     """
-    defs = make_defs()
+    defs = _phase2_defs()
     rng = random.Random(seed)
     build = BuildState()
     for _ in range(levels):
@@ -187,7 +203,7 @@ def test_only_path_a_reaches_evolution():
     upgrades, pinning its dagger at level 1 forever, so it is never eligible --
     confirmed both at the divergence level count and far beyond it.
     """
-    defs = make_defs()
+    defs = _phase2_defs()
     build_a = _drive_path(_SEED, _PATH_A_PREFER, _PATH_A_SKIP, _LEVELS)
     build_b = _drive_path(_SEED, _PATH_B_PREFER, _PATH_B_SKIP, _LEVELS)
 

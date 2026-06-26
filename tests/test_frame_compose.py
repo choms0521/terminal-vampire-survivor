@@ -18,7 +18,7 @@ from terminal_vs.render.frame import (
     compose_frame,
 )
 from terminal_vs.rules.leveling import Choice
-from terminal_vs.sim.state import Enemy, Pickup, Projectile, new_run
+from terminal_vs.sim.state import Effect, Enemy, Pickup, Projectile, new_run
 from terminal_vs.world import world_to_cell
 
 from .conftest import make_config
@@ -69,6 +69,29 @@ def test_draw_priority_projectile_over_enemy_over_pickup():
     assert glyph == proj.glyph        # projectile is the top non-player layer
     assert glyph != enemy.glyph
     assert glyph != pickup.glyph
+
+
+def test_effect_draws_over_entities_but_under_player():
+    """A visual effect overdraws an entity it shares a cell with (it is above the
+    entity layers), yet the always-on-top player still wins its own cell -- draw
+    priority pickup < enemy < projectile < effect < player (master 3.4)."""
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    # A non-player cell holding an enemy + an effect: the effect draws on top.
+    wx, wy = state.player.x + 3.0, state.player.y
+    state.enemies.append(Enemy(state.alloc_id(), wx, wy, hp=5.0))
+    state.effects.append(Effect(wx, wy, glyph=")", color="red", ttl=0.1))
+    grid = compose_cells(state, state.camera, cfg)
+    col, row = world_to_cell(wx, wy, state.camera, cfg)
+    assert grid[row][col][0] == ")"  # effect over the enemy
+
+    # An effect on the player's own cell loses to the always-on-top player.
+    state.effects.append(
+        Effect(state.player.x, state.player.y, glyph=")", color="red", ttl=0.1)
+    )
+    grid2 = compose_cells(state, state.camera, cfg)
+    pcol, prow = cfg.viewport_w // 2, cfg.viewport_h // 2
+    assert grid2[prow][pcol][0] == state.player.glyph  # player over the effect
 
 
 def test_compose_frame_shows_pause_overlay_in_pause_mode():

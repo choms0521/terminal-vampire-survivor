@@ -12,6 +12,11 @@ from __future__ import annotations
 import random
 
 from terminal_vs.render.frame import (
+    _DOT_COLOR,
+    _DOT_GLYPH,
+    _DOT_SPACING_X,
+    _DOT_SPACING_Y,
+    _FLOOR_GLYPH,
     _KNOWN_COLORS,
     _identity_colorize,
     _term_colorize,
@@ -64,16 +69,86 @@ def test_offscreen_entity_is_culled():
     assert "z" not in glyphs  # the off-screen enemy glyph is absent
 
 
-def test_floor_cells_are_uncolored():
-    """Floor cells carry no color so the emitter emits no SGR per empty cell
-    (master 3.3 byte budget). Guards against re-coloring the floor."""
+def test_blank_floor_cells_are_uncolored():
+    """Blank floor cells carry no color so the emitter emits no SGR per empty cell
+    (master 3.3 byte budget). The thousands of blank cells are the budget concern;
+    the sparse background dots are colored separately (~130 per default viewport).
+    Guards against re-coloring the empty floor."""
     cfg = make_config()
     state = new_run(cfg, random.Random(0))
     grid = compose_cells(state, state.camera, cfg)
-    # A corner cell is floor (the player is centered; a fresh run has no enemies).
-    glyph, color = grid[0][0]
-    assert glyph == " "
-    assert color == ""  # uncolored -> the emitter returns a bare glyph (no SGR)
+    # Every blank cell (glyph == space, i.e. not a dot or entity) must be uncolored.
+    for row in grid:
+        for glyph, color in row:
+            if glyph == _FLOOR_GLYPH:
+                assert color == ""  # uncolored -> emitter returns a bare glyph
+
+
+def test_background_dot_lattice_is_present():
+    """The floor is seeded with background dots (not an empty void), so the world
+    reads as a large traversable space rather than the player standing still."""
+    cfg = make_config()  # default 100x30 viewport: ample room for the 8x3 lattice
+    state = new_run(cfg, random.Random(0))
+    grid = compose_cells(state, state.camera, cfg)
+    dot_count = sum(1 for row in grid for glyph, _ in row if glyph == _DOT_GLYPH)
+    assert dot_count > 0
+
+
+def test_background_dots_are_dimmed_not_default_fg():
+    """Background dots are colored dim so they never compete with the player /
+    enemies. Guards against the dots rendering in the bright default foreground."""
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    grid = compose_cells(state, state.camera, cfg)
+    dot_colors = {color for row in grid for glyph, color in row if glyph == _DOT_GLYPH}
+    assert dot_colors == {_DOT_COLOR}  # every dot carries the dim color
+    assert _DOT_COLOR in _KNOWN_COLORS  # and the emitter knows how to dim it
+
+
+def test_background_dots_scroll_with_camera():
+    """Moving the camera shifts the world-fixed dot lattice on screen, so the
+    player reads as moving THROUGH a world rather than standing in place. Guards
+    the core "movement feel": the dots are anchored in world space, not screen
+    space."""
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    grid_a = compose_cells(state, state.camera, cfg)
+    # Shift by a non-lattice-multiple world delta so the on-screen dots must move
+    # (1.0 world -> 2 cells in X at aspect_x=2 / 1 row in Y, both below the period).
+    state.camera.x += 1.0
+    state.camera.y += 1.0
+    grid_b = compose_cells(state, state.camera, cfg)
+
+    def _dot_cells(grid):
+        return {
+            (col, row)
+            for row, cells in enumerate(grid)
+            for col, (glyph, _) in enumerate(cells)
+            if glyph == _DOT_GLYPH
+        }
+
+    assert _dot_cells(grid_a) != _dot_cells(grid_b)  # the lattice scrolled
+
+
+def test_entity_draws_over_a_background_dot():
+    """An entity sharing a cell with a lattice dot is drawn on top: the player sits
+    on the world origin (a lattice point) yet renders as its glyph, proving dots
+    are background-only and never occlude gameplay."""
+    cfg = make_config()
+    state = new_run(cfg, random.Random(0))
+    # Precondition: the player must sit on a lattice point for a dot to actually
+    # land on its cell -- otherwise this test would pass trivially (no dot to
+    # overdraw) and silently rot if a future change started the player off-origin.
+    # The fresh player starts at the world origin, a multiple of every spacing.
+    assert state.player.x % _DOT_SPACING_X == 0.0
+    assert state.player.y % _DOT_SPACING_Y == 0.0
+
+    grid = compose_cells(state, state.camera, cfg)
+    center_col = cfg.viewport_w // 2
+    center_row = cfg.viewport_h // 2
+    glyph, _ = grid[center_row][center_col]
+    assert glyph == state.player.glyph  # entity wins over the background dot
+    assert glyph != _DOT_GLYPH
 
 
 def test_swarm_enemy_renders_with_known_color():
