@@ -115,6 +115,9 @@ _UPGRADE_DEFAULTS: dict[str, object] = {
 _VALID_UPGRADE_STATS: frozenset[str] = frozenset(
     {"attack_speed", "move_speed", "magnet"}
 )
+_META_DEFAULTS: dict[str, object] = {
+    "gold_per_kill": 1,
+}
 
 # Default content set, used when balance.toml omits a whole section (so the game
 # still has weapons/passives/enemies/evolutions on a first launch). Each entry is
@@ -477,6 +480,10 @@ def _normalized_balance(balance_data: dict) -> dict:
     magnet_range = _f(pickup_raw, "magnet_range", _PICKUP_DEFAULTS)
     _require_positive("pickup.magnet_range", magnet_range)
 
+    meta_raw = balance_data.get("meta", {})
+    gold_per_kill = _i(meta_raw, "gold_per_kill", _META_DEFAULTS)
+    _require_positive("meta.gold_per_kill", gold_per_kill)
+
     # Cross-reference: every evolution's base, result_weapon, and requires_passive
     # must resolve to real entries in their respective tables.
     for evo_name, ev in evolution.items():
@@ -509,6 +516,7 @@ def _normalized_balance(balance_data: dict) -> dict:
         "evolution": evolution,
         "director": director,
         "pickup": {"magnet_range": magnet_range},
+        "meta": {"gold_per_kill": gold_per_kill},
     }
 
 

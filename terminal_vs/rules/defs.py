@@ -215,6 +215,7 @@ class BalanceDefs:
         default_factory=lambda: LevelingDef(3, 5.0, 1.5)
     )
     magnet_range: float = 4.0
+    gold_per_kill: int = 1  # gold awarded per enemy kill (Phase 4A meta progression)
 
 
 def build_defs(raw_balance: dict) -> BalanceDefs:
@@ -241,6 +242,7 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
     director_raw: dict = raw_balance.get("director", {})
     leveling_raw: dict = raw_balance.get("leveling", {})
     pickup_raw: dict = raw_balance.get("pickup", {})
+    meta_raw: dict = raw_balance.get("meta", {})
 
     weapons = {
         name: WeaponDef(
@@ -330,6 +332,7 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
     )
 
     magnet_range = float(pickup_raw["magnet_range"])
+    gold_per_kill = int(meta_raw.get("gold_per_kill", 1))
 
     return BalanceDefs(
         # Wrap the name-keyed tables in read-only proxies so the immutability
@@ -343,4 +346,5 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
         director=director,
         leveling=leveling,
         magnet_range=magnet_range,
+        gold_per_kill=gold_per_kill,
     )

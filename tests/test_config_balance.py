@@ -238,6 +238,13 @@ def test_upgrade_cost_growth_below_one_raises(tmp_path):
     assert "cost_growth" in str(exc.value)
 
 
+def test_meta_gold_per_kill_non_positive_raises(tmp_path):
+    """meta.gold_per_kill must be > 0 -- a 0 / negative reward is a balance error."""
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + "\n[meta]\ngold_per_kill = 0\n")
+    assert "gold_per_kill" in str(exc.value)
+
+
 def test_missing_key_falls_back_to_default(tmp_path):
     """A weapon entry missing keys falls back to code defaults for those keys."""
     # dagger present but only declares cooldown; the rest fall back.

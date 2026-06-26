@@ -207,3 +207,9 @@ reinforce_steps = [
 # passive multiplies this base radius.
 [pickup]
 magnet_range = 4.0
+
+# Meta progression: gold earned per enemy kill. Banked at run end into
+# saves/meta.json and spent on permanent upgrades. Run-end gold = kills *
+# gold_per_kill.
+[meta]
+gold_per_kill = 1

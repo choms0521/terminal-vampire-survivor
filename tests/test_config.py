@@ -231,3 +231,4 @@ def test_shipped_config_loads_and_validates():
     assert upgrades["swift"].stat == "move_speed"
     assert upgrades["fury"].stat == "attack_speed"
     assert upgrades["fury"].cost_base == 60
+    assert cfg.defs.gold_per_kill == 1  # Phase 4A: gold banked per enemy kill
