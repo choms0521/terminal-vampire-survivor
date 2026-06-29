@@ -97,6 +97,23 @@ pierce           = 99      # passes through a whole line (collision is 1 enemy/t
 glyph            = "="
 color            = "green"
 
+# Evolution result weapon for lance_x. Replaces lance when the evolution applies.
+# max_level is 1 (evolved weapons are terminal, like dagger_evolved). It is a
+# faster, harder-hitting 3-dart piercing fan and reuses the existing "nearest"
+# projectile targeting -- adding it is data-only (no new targeting code).
+[weapons.lance_evolved]
+max_level        = 1
+cooldown         = 0.9
+damage           = 22.0
+projectile_count = 3
+projectile_speed = 30.0
+projectile_ttl   = 1.8
+targeting        = "nearest"
+pierce           = 99
+glyph            = "#"
+color            = "green"
+spread_angle     = 20.0       # fan the 3 darts across a 20 deg cone
+
 # Nova: a 360-degree burst around the player for crowd control (targeting "radial").
 [weapons.nova]
 max_level        = 8
@@ -175,6 +192,13 @@ spawn_weight = 30.0
 glyph        = "x"
 color        = "magenta"
 
+[enemies.brute]               # slow heavy bruiser: rare, high hp, low speed
+hp           = 40.0
+move_speed   = 1.5
+spawn_weight = 8.0
+glyph        = "B"
+color        = "yellow"
+
 # Evolution rule: dagger at base_max_level + the attack_speed passive owned ->
 # the dagger_evolved weapon. Adding evolutions is data-only (no code changes).
 [evolution.dagger_x]
@@ -182,6 +206,14 @@ base             = "dagger"
 requires_passive = "attack_speed"
 base_max_level   = 8
 result_weapon    = "dagger_evolved"
+
+# Evolution rule: lance at base_max_level + the move_speed passive owned ->
+# the lance_evolved weapon. Data-only, mirroring dagger_x (no code changes).
+[evolution.lance_x]
+base             = "lance"
+requires_passive = "move_speed"
+base_max_level   = 8
+result_weapon    = "lance_evolved"
 
 # Director difficulty curve. Spawn interval shrinks (spawn rate rises) over time;
 # reinforce_steps is a per-minute table of [minute, interval_mult, concurrent].
