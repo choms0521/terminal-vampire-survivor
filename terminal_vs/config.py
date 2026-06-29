@@ -189,8 +189,12 @@ def _require_positive(name: str, value: float) -> None:
     and sectioned (e.g. ``weapons.dagger.cooldown``) while operating-point keys
     are flat (e.g. ``sim_tps``), so the message names the file the bad value came
     from.
+
+    A bool is rejected explicitly: ``bool`` is a subclass of ``int``, so ``True``
+    would otherwise satisfy ``value <= 0`` as 1 and parse silently as 1.0. This
+    matches the explicit bool guard in :func:`_validate_boss_spawn_times`.
     """
-    if value <= 0:
+    if isinstance(value, bool) or value <= 0:
         source = "config/balance.toml" if "." in name else "config/tuning.toml"
         raise ValueError(
             f"config: {name} must be > 0, got {value!r} (check {source})"
@@ -331,6 +335,14 @@ def _validate_enemy(name: str, e: dict) -> None:
     # damage, speed, and ttl, else it would emit no-op projectiles. fire_cadence 0
     # is a non-firing enemy, which legitimately leaves the other fire fields at 0.
     # A negative cadence would never tick down to a shot, so it is rejected.
+    # Reject a bool before float(): bool is an int subclass, so fire_cadence=true
+    # would parse as 1.0 and silently turn a non-firing enemy into a caster. Mirrors
+    # the explicit bool guard for director.boss_spawn_times.
+    if isinstance(e["fire_cadence"], bool):
+        raise ValueError(
+            f"config: enemies.{name}.fire_cadence must be a number >= 0, got "
+            f"{e['fire_cadence']!r} (check config/balance.toml)"
+        )
     fire_cadence = float(e["fire_cadence"])
     if fire_cadence < 0.0:
         raise ValueError(

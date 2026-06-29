@@ -477,6 +477,15 @@ def test_enemy_xp_value_non_positive_raises(tmp_path):
     assert "xp_value" in str(exc.value)
 
 
+def test_enemy_xp_value_bool_raises(tmp_path):
+    """xp_value = true must NOT slip through as 1.0 (bool is an int subclass), so a
+    boolean is rejected at load just like a non-positive value."""
+    bad = _BOSS_BLOCK.replace("xp_value = 60.0", "xp_value = true")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "xp_value" in str(exc.value)
+
+
 def test_director_boss_spawn_times_parse(tmp_path):
     """[director].boss_spawn_times parses into the DirectorDef as a float tuple."""
     balance = VALID_BALANCE.replace(
@@ -548,6 +557,15 @@ def test_firing_enemy_with_zero_fire_damage_raises(tmp_path):
 def test_negative_fire_cadence_raises(tmp_path):
     """A negative fire_cadence would never tick down to a shot, so it is rejected."""
     bad = _CASTER_BLOCK.replace("fire_cadence = 2.5", "fire_cadence = -1.0")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "fire_cadence" in str(exc.value)
+
+
+def test_bool_fire_cadence_raises(tmp_path):
+    """fire_cadence = true must NOT parse as 1.0 (bool is an int subclass) and
+    silently turn a non-firing enemy into a caster, so a boolean is rejected."""
+    bad = _CASTER_BLOCK.replace("fire_cadence = 2.5", "fire_cadence = true")
     with pytest.raises(ValueError) as exc:
         _load(tmp_path, VALID_BALANCE + bad)
     assert "fire_cadence" in str(exc.value)

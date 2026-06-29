@@ -101,7 +101,7 @@ def step(state: SimState, intent: Intent, cfg: Config, rng: random.Random) -> No
     _advance_projectiles(state, dt)                 # 5) projectiles: move + ttl
     _advance_effects(state, dt)                     # 5b) visual effects: ttl countdown (no move, no collision)
     _resolve_collisions(state, cfg)                 # 6) collisions: pierce-aware proj<->enemy, enemy<->player+knockback
-    _drop_xp_on_death(state, rng)                   # 7) death->xp drop: fixed gem
+    _drop_xp_on_death(state, rng)                   # 7) death->xp drop: gem carries the dead enemy's xp_value (data-driven; a boss's is large)
     _collect_pickups(state, cfg)                    # 8) pickup->xp->level flag: magnet-passive-scaled
     _cleanup_dead_and_far(state, cfg)               # 9) cleanup: dead removal + far despawn
     state.camera.follow(state.player)               # 10) camera: final follow after knockback so the rendered frame is centered

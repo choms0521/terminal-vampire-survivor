@@ -88,6 +88,34 @@ def test_boss_spawns_exactly_once_on_due_and_not_while_alive():
     assert len(bosses) == 1  # the alive guard prevents a second spawn
 
 
+def test_boss_with_nonpositive_weight_is_not_spawned():
+    """A directly-built BalanceDefs whose only boss carries a non-positive
+    spawn_weight yields a zero-total boss table. maybe_spawn must skip it (mirroring
+    spawn_enemies) rather than let _weighted_pick make an undefined pick on a
+    zero-total table -- and it must not raise."""
+    defs = make_defs(
+        enemies={
+            "walker": EnemyDef("walker", 10.0, 2.5, 70.0, "z", "red"),
+            "boss_tank": EnemyDef(
+                "boss_tank", 500.0, 1.0, 0.0, "M", "red", boss=True, xp_value=50.0
+            ),
+        },
+        director=DirectorDef(
+            base_spawn_interval=2.0,
+            min_spawn_interval=0.4,
+            reinforce_steps=(ReinforceStep(0, 1.0, 1),),
+            boss_spawn_times=(0.05,),
+        ),
+    )
+    cfg = make_config(defs=defs)
+    rng = random.Random(0)
+    state = new_run(cfg, rng)
+
+    state.elapsed = 0.05  # park on the crossing window so boss_due fires
+    maybe_spawn(state, cfg, rng)
+    assert [e for e in state.enemies if e.kind == "boss_tank"] == []
+
+
 def test_boss_kill_drops_large_xp_gem():
     """Killing a boss drops a pickup carrying the boss's data-driven ``xp_value``
     (much larger than a regular enemy's), via step stage 7."""

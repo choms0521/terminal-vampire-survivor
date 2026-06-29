@@ -168,19 +168,29 @@ def _total_entities(state: SimState) -> int:
     )
 
 
-def _ring_spawn_xy(
-    state: SimState, cfg: Config, rng: random.Random
-) -> tuple[float, float]:
-    """A random point on the off-screen spawn ring (just outside the viewport).
+def _spawn_ring_radius(state: SimState, cfg: Config) -> float:
+    """Radius of the off-screen spawn ring for the current camera/viewport.
 
-    The ring radius is half the larger visible extent plus ``_RING_MARGIN`` so the
-    point sits just off-screen on every side; the angle draws once from ``rng``, so
-    a caller that picks a kind first keeps a fixed (kind, angle) rng draw order.
+    Half the larger visible extent plus ``_RING_MARGIN`` so a point on the ring sits
+    just off-screen on every side. Draws no ``rng`` and depends only on the camera
+    and viewport, both of which are constant across a single spawn wave, so a caller
+    spawning ``concurrent`` enemies can compute this ONCE before the loop rather than
+    per enemy.
     """
     bounds = visible_bounds(state.camera, cfg)
     half_w = (bounds.max_x - bounds.min_x) / 2.0
     half_h = (bounds.max_y - bounds.min_y) / 2.0
-    ring_radius = max(half_w, half_h) + _RING_MARGIN
+    return max(half_w, half_h) + _RING_MARGIN
+
+
+def _ring_point(
+    state: SimState, ring_radius: float, rng: random.Random
+) -> tuple[float, float]:
+    """A random point on the spawn ring at ``ring_radius``.
+
+    The angle draws once from ``rng``, so a caller that picks a kind first keeps a
+    fixed (kind, angle) rng draw order -- load-bearing for determinism.
+    """
     angle = rng.random() * 2.0 * math.pi
     return (
         state.camera.x + math.cos(angle) * ring_radius,
@@ -213,6 +223,10 @@ def spawn_enemies(
     if sum(weight for _, weight in params.enemy_weights) <= 0:
         return
 
+    # The ring radius is constant across the wave (camera/viewport do not move while
+    # spawning), so compute it once here rather than per enemy. Only the per-enemy
+    # angle draws from rng, inside _ring_point, preserving the (kind, angle) order.
+    ring_radius = _spawn_ring_radius(state, cfg)
     for _ in range(params.concurrent):
         if _total_entities(state) >= cfg.entity_cap:
             return
@@ -220,7 +234,7 @@ def spawn_enemies(
         enemy_def = cfg.defs.enemies.get(kind)
         if enemy_def is None:
             continue
-        spawn_x, spawn_y = _ring_spawn_xy(state, cfg, rng)
+        spawn_x, spawn_y = _ring_point(state, ring_radius, rng)
         state.enemies.append(
             make_enemy(state.alloc_id(), spawn_x, spawn_y, enemy_def)
         )
@@ -248,13 +262,19 @@ def _spawn_boss(
     """
     if not params.boss_weights:
         return
+    # Non-positive total weight: nothing to draw from. Mirrors the same guard in
+    # spawn_enemies -- config validates each spawn_weight > 0, but a directly-built
+    # BalanceDefs (e.g. a test) could carry zero/negative boss weights, and
+    # _weighted_pick on a zero-total table would make an undefined selection.
+    if sum(weight for _, weight in params.boss_weights) <= 0:
+        return
     if _total_entities(state) >= cfg.entity_cap:
         return
     kind = _weighted_pick(params.boss_weights, rng)
     enemy_def = cfg.defs.enemies.get(kind)
     if enemy_def is None:
         return
-    spawn_x, spawn_y = _ring_spawn_xy(state, cfg, rng)
+    spawn_x, spawn_y = _ring_point(state, _spawn_ring_radius(state, cfg), rng)
     state.enemies.append(make_enemy(state.alloc_id(), spawn_x, spawn_y, enemy_def))
 
 
