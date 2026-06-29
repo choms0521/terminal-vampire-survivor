@@ -274,3 +274,84 @@ def test_boss_kind_is_a_weighted_pick_over_the_boss_pool():
             e.kind for e in state.enemies if e.kind in ("boss_tank", "boss_caster")
         )
     assert picked == {"boss_tank", "boss_caster"}  # both bosses selectable by seed
+
+
+def test_boss_definition_does_not_perturb_the_seeded_spawn_stream():
+    """The load-bearing determinism invariant: adding a boss to the enemy table
+    must not change the REGULAR spawn stream under the same seed (boss_due draws no
+    rng until a mark is crossed, and the boss is excluded from enemy_weights). Run
+    the same seed with and without a boss defined -- the boss mark parked far in the
+    future -- and assert the regular-enemy spawns are identical over many ticks."""
+    from terminal_vs.sim.state import NEUTRAL_INTENT
+    from terminal_vs.sim.step import step
+
+    no_boss = make_defs()  # walker/swarm, no boss, no boss schedule
+    with_boss = make_defs(
+        enemies={
+            "walker": EnemyDef("walker", 10.0, 2.5, 70.0, "z", "red"),
+            "swarm": EnemyDef("swarm", 4.0, 5.0, 30.0, "x", "magenta"),
+            "boss_tank": EnemyDef(
+                "boss_tank", 600.0, 1.6, 1.0, "M", "red", boss=True, xp_value=60.0
+            ),
+        },
+        director=DirectorDef(
+            2.0, 0.4, (ReinforceStep(0, 1.0, 1),), boss_spawn_times=(999.0,)
+        ),
+    )
+
+    def run_positions(defs):
+        cfg = make_config(defs=defs)
+        rng = random.Random(12345)
+        state = new_run(cfg, rng)
+        for _ in range(200):  # 200 ticks, far before the 999s boss mark
+            step(state, NEUTRAL_INTENT, cfg, rng)
+        return [(e.kind, round(e.x, 9), round(e.y, 9)) for e in state.enemies]
+
+    assert run_positions(no_boss) == run_positions(with_boss)
+
+
+def test_melee_boss_with_zero_fire_cadence_never_fires():
+    """A boss whose fire_cadence is 0 (the tank) never emits an enemy projectile:
+    the non-firing guard short-circuits before any shot."""
+    from terminal_vs.sim.step import _fire_enemy_projectiles
+
+    cfg = make_config(defs=_defs_with_boss())  # boss_tank: fire_cadence defaults 0
+    rng = random.Random(0)
+    state = new_run(cfg, rng)
+    boss = make_enemy(state.alloc_id(), 5.0, 0.0, cfg.defs.enemies["boss_tank"])
+    state.enemies.append(boss)
+
+    for _ in range(50):
+        _fire_enemy_projectiles(state, cfg, 1.0 / cfg.sim_tps, rng)
+
+    assert not [p for p in state.projectiles if p.team == "enemy"]
+
+
+def test_second_boss_spawns_at_the_next_mark_after_the_first_dies():
+    """Once the first boss dies, the next boss_spawn_times mark spawns another (the
+    _boss_alive guard only suppresses a second boss WHILE one is alive)."""
+    defs = make_defs(
+        enemies={
+            "walker": EnemyDef("walker", 10.0, 2.5, 70.0, "z", "red"),
+            "boss_tank": EnemyDef(
+                "boss_tank", 600.0, 1.6, 1.0, "M", "red", boss=True, xp_value=60.0
+            ),
+        },
+        director=DirectorDef(
+            2.0, 0.4, (ReinforceStep(0, 1.0, 1),), boss_spawn_times=(0.05, 0.15)
+        ),
+    )
+    cfg = make_config(defs=defs)
+    rng = random.Random(0)
+    state = new_run(cfg, rng)
+
+    state.elapsed = 0.05  # first mark
+    maybe_spawn(state, cfg, rng)
+    assert len([e for e in state.enemies if e.kind == "boss_tank"]) == 1
+
+    # the first boss dies (drop it from the buffer, as cleanup would)
+    state.enemies = [e for e in state.enemies if e.kind != "boss_tank"]
+
+    state.elapsed = 0.15  # second mark, no boss alive
+    maybe_spawn(state, cfg, rng)
+    assert len([e for e in state.enemies if e.kind == "boss_tank"]) == 1

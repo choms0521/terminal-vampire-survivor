@@ -553,6 +553,23 @@ def test_negative_fire_cadence_raises(tmp_path):
     assert "fire_cadence" in str(exc.value)
 
 
+def test_firing_enemy_with_zero_fire_speed_raises(tmp_path):
+    """A firing enemy with zero fire_speed emits a stationary shot, so it is rejected."""
+    bad = _CASTER_BLOCK.replace("fire_speed = 9.0", "fire_speed = 0")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "fire_speed" in str(exc.value)
+
+
+def test_firing_enemy_with_zero_fire_ttl_raises(tmp_path):
+    """A firing enemy with zero fire_ttl emits a shot culled before it travels, so
+    it is rejected at load."""
+    bad = _CASTER_BLOCK.replace("fire_ttl = 3.0", "fire_ttl = 0")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "fire_ttl" in str(exc.value)
+
+
 def test_non_firing_enemy_may_leave_fire_fields_zero(tmp_path):
     """A regular enemy (fire_cadence 0) legitimately leaves the other fire fields
     at 0 -- the positive-fire checks apply only to a firing enemy."""
