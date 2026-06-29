@@ -57,8 +57,6 @@ _ENEMY_TOUCH_RADIUS = 0.75
 _PLAYER_KNOCKBACK_FORCE = 1.5
 # Contact damage an enemy deals to the player on touch, per tick.
 _ENEMY_CONTACT_DAMAGE = 5.0
-# Xp value of a gem dropped on enemy death.
-_XP_GEM_VALUE = 1.0
 # Player base move speed as a multiple of the WALKER (basic chaser) move speed.
 # Strictly > 1 so the player can out-run walkers and kite -- the core survival
 # mechanic that keeps the vertical slice playable. The swarm enemy is
@@ -378,8 +376,9 @@ def _drop_xp_on_death(state: SimState, rng: random.Random) -> None:
     tick. So iterating dead enemies here counts each kill exactly once -- the
     single home for the ``state.kills`` tally (HUD + run-outcome metric).
 
-    ``rng`` is accepted for future drop-table variety (deferred); a single
-    fixed-value gem is dropped per kill, so it is unused here.
+    ``rng`` is accepted for future drop-table variety (deferred); one gem carrying
+    the dead enemy's ``xp_value`` is dropped per kill (a boss's is much larger than
+    a mob's), so rng is unused here.
     """
     for enemy in state.enemies:
         if rules_damage.is_dead(enemy.hp):
@@ -389,7 +388,7 @@ def _drop_xp_on_death(state: SimState, rng: random.Random) -> None:
                     entity_id=state.alloc_id(),
                     x=enemy.x,
                     y=enemy.y,
-                    xp=_XP_GEM_VALUE,
+                    xp=enemy.xp_value,
                 )
             )
 

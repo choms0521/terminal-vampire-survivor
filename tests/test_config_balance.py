@@ -442,3 +442,65 @@ def test_reinforce_step_malformed_row_raises(tmp_path):
     msg = str(exc.value)
     assert "reinforce_steps" in msg
     assert "config/balance.toml" in msg
+
+
+# --- Phase 4C: boss enemy + xp_value + director boss schedule -----------------
+
+_BOSS_BLOCK = (
+    "\n[enemies.boss_tank]\n"
+    "hp = 600.0\n"
+    "move_speed = 1.6\n"
+    "spawn_weight = 1.0\n"
+    'glyph = "M"\n'
+    'color = "red"\n'
+    "boss = true\n"
+    "xp_value = 60.0\n"
+)
+
+
+def test_enemy_boss_flag_and_xp_value_parse(tmp_path):
+    """A boss-flagged enemy with an xp_value loads into EnemyDef with both set,
+    and a regular enemy defaults to non-boss with the 1.0 reward."""
+    cfg = _load(tmp_path, VALID_BALANCE + _BOSS_BLOCK)
+    boss = cfg.defs.enemies["boss_tank"]
+    assert boss.boss is True
+    assert boss.xp_value == 60.0
+    assert cfg.defs.enemies["walker"].boss is False
+    assert cfg.defs.enemies["walker"].xp_value == 1.0
+
+
+def test_enemy_xp_value_non_positive_raises(tmp_path):
+    """A non-positive xp_value (zero reward) is a balance error, rejected at load."""
+    bad = _BOSS_BLOCK.replace("xp_value = 60.0", "xp_value = 0")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "xp_value" in str(exc.value)
+
+
+def test_director_boss_spawn_times_parse(tmp_path):
+    """[director].boss_spawn_times parses into the DirectorDef as a float tuple."""
+    balance = VALID_BALANCE.replace(
+        "reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+        "boss_spawn_times = [60.0, 120.0]\n"
+        "    reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+    )
+    cfg = _load(tmp_path, balance)
+    assert cfg.defs.director.boss_spawn_times == (60.0, 120.0)
+
+
+def test_director_boss_spawn_times_default_empty(tmp_path):
+    """Omitting boss_spawn_times yields an empty schedule (no boss spawns)."""
+    cfg = _load(tmp_path)  # VALID_BALANCE declares no boss_spawn_times
+    assert cfg.defs.director.boss_spawn_times == ()
+
+
+def test_director_boss_spawn_time_negative_raises(tmp_path):
+    """A negative boss spawn mark (never crossed by the elapsed timer) is rejected."""
+    balance = VALID_BALANCE.replace(
+        "reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+        "boss_spawn_times = [-5.0]\n"
+        "    reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+    )
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, balance)
+    assert "boss_spawn_times" in str(exc.value)

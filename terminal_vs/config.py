@@ -87,6 +87,8 @@ _ENEMY_DEFAULTS: dict[str, object] = {
     "spawn_weight": 1.0,
     "glyph": "z",
     "color": "red",
+    "boss": False,
+    "xp_value": 1.0,
 }
 _EVOLUTION_DEFAULTS: dict[str, object] = {
     "base": "dagger",
@@ -316,7 +318,11 @@ def _validate_enemy(name: str, e: dict) -> None:
     """Range validation for one enemy entry."""
     _require_positive(f"enemies.{name}.hp", e["hp"])
     _require_positive(f"enemies.{name}.move_speed", e["move_speed"])
+    # spawn_weight stays > 0 even for a boss (which is excluded from the weighted
+    # pool): the value is unused for a boss, but one positive-weight rule for every
+    # enemy is simpler than a boss-only exemption. xp_value is the death reward.
     _require_positive(f"enemies.{name}.spawn_weight", e["spawn_weight"])
+    _require_positive(f"enemies.{name}.xp_value", e["xp_value"])
 
 
 def _validate_reinforce_steps(steps) -> None:
@@ -358,6 +364,23 @@ def _validate_reinforce_steps(steps) -> None:
                 f"{idx} (check config/balance.toml)"
             )
         prev_minute = minute
+
+
+def _validate_boss_spawn_times(times) -> None:
+    """Validate the director's boss spawn schedule.
+
+    Each mark is an elapsed-seconds value >= 0 at which a boss spawns. An empty
+    schedule is valid (no boss). A negative mark would never be crossed by the
+    monotonic elapsed timer (so the boss would never appear), and a bool sneaks
+    through ``isinstance(x, int)``, so both are rejected at load time naming the
+    offending index and config/balance.toml.
+    """
+    for idx, t in enumerate(times):
+        if isinstance(t, bool) or not isinstance(t, (int, float)) or t < 0:
+            raise ValueError(
+                f"config: director.boss_spawn_times[{idx}] must be a number >= 0, "
+                f"got {t!r} (check config/balance.toml)"
+            )
 
 
 def _normalized_balance(balance_data: dict) -> dict:
@@ -466,6 +489,7 @@ def _normalized_balance(balance_data: dict) -> dict:
         "reinforce_steps": director_raw.get(
             "reinforce_steps", _DIRECTOR_DEFAULTS["reinforce_steps"]
         ),
+        "boss_spawn_times": director_raw.get("boss_spawn_times", []),
     }
     _require_positive("director.base_spawn_interval", director["base_spawn_interval"])
     _require_positive("director.min_spawn_interval", director["min_spawn_interval"])
@@ -475,6 +499,7 @@ def _normalized_balance(balance_data: dict) -> dict:
             "(check config/balance.toml)"
         )
     _validate_reinforce_steps(director["reinforce_steps"])
+    _validate_boss_spawn_times(director["boss_spawn_times"])
 
     pickup_raw = balance_data.get("pickup", {})
     magnet_range = _f(pickup_raw, "magnet_range", _PICKUP_DEFAULTS)

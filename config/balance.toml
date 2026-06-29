@@ -199,6 +199,19 @@ spawn_weight = 8.0
 glyph        = "B"
 color        = "yellow"
 
+# Boss enemy: very high hp, slow, large xp reward. Excluded from the regular
+# weighted spawn pool (boss = true) and spawned only when the director crosses a
+# [director].boss_spawn_times mark. spawn_weight is unused for a boss but kept > 0
+# for the schema. Phase 4C commit 1 ships this tank boss; a caster boss follows.
+[enemies.boss_tank]
+hp           = 600.0
+move_speed   = 1.6        # slower than the player (walker 2.5 * 1.5) so it can be kited
+spawn_weight = 1.0        # unused for a boss (excluded from the weighted pool)
+glyph        = "M"
+color        = "red"
+boss         = true
+xp_value     = 60.0       # large reward vs a regular 1.0 gem
+
 # Evolution rule: dagger at base_max_level + the attack_speed passive owned ->
 # the dagger_evolved weapon. Adding evolutions is data-only (no code changes).
 [evolution.dagger_x]
@@ -226,6 +239,10 @@ result_weapon    = "lance_evolved"
 [director]
 base_spawn_interval = 2.0
 min_spawn_interval  = 0.4
+# Elapsed-seconds marks at which a boss spawns (each crossed once; a second is
+# skipped while one is still alive). The boss kind is a weighted pick over the
+# boss-flagged enemies.
+boss_spawn_times = [60.0, 120.0]
 reinforce_steps = [
   [0, 1.0,  1],
   [1, 0.85, 2],
