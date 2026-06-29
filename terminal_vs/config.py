@@ -89,6 +89,10 @@ _ENEMY_DEFAULTS: dict[str, object] = {
     "color": "red",
     "boss": False,
     "xp_value": 1.0,
+    "fire_cadence": 0.0,
+    "fire_damage": 0.0,
+    "fire_speed": 0.0,
+    "fire_ttl": 0.0,
 }
 _EVOLUTION_DEFAULTS: dict[str, object] = {
     "base": "dagger",
@@ -323,6 +327,20 @@ def _validate_enemy(name: str, e: dict) -> None:
     # enemy is simpler than a boss-only exemption. xp_value is the death reward.
     _require_positive(f"enemies.{name}.spawn_weight", e["spawn_weight"])
     _require_positive(f"enemies.{name}.xp_value", e["xp_value"])
+    # A firing enemy (fire_cadence > 0, a caster boss) must carry a positive shot
+    # damage, speed, and ttl, else it would emit no-op projectiles. fire_cadence 0
+    # is a non-firing enemy, which legitimately leaves the other fire fields at 0.
+    # A negative cadence would never tick down to a shot, so it is rejected.
+    fire_cadence = float(e["fire_cadence"])
+    if fire_cadence < 0.0:
+        raise ValueError(
+            f"config: enemies.{name}.fire_cadence must be >= 0, got "
+            f"{e['fire_cadence']!r} (check config/balance.toml)"
+        )
+    if fire_cadence > 0.0:
+        _require_positive(f"enemies.{name}.fire_damage", e["fire_damage"])
+        _require_positive(f"enemies.{name}.fire_speed", e["fire_speed"])
+        _require_positive(f"enemies.{name}.fire_ttl", e["fire_ttl"])
 
 
 def _validate_reinforce_steps(steps) -> None:

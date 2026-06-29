@@ -127,6 +127,14 @@ class EnemyDef:
     color: str
     boss: bool = False
     xp_value: float = 1.0
+    # Enemy projectile fire (a caster boss). ``fire_cadence`` is the seconds between
+    # shots (0 = never fires -- the default for regular enemies and a melee boss);
+    # a shot is aimed straight at the player at ``fire_speed``, deals ``fire_damage``,
+    # and lives ``fire_ttl`` seconds.
+    fire_cadence: float = 0.0
+    fire_damage: float = 0.0
+    fire_speed: float = 0.0
+    fire_ttl: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -308,6 +316,10 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
             color=str(e["color"]),
             boss=bool(e.get("boss", False)),
             xp_value=float(e.get("xp_value", 1.0)),
+            fire_cadence=float(e.get("fire_cadence", 0.0)),
+            fire_damage=float(e.get("fire_damage", 0.0)),
+            fire_speed=float(e.get("fire_speed", 0.0)),
+            fire_ttl=float(e.get("fire_ttl", 0.0)),
         )
         for name, e in enemies_raw.items()
     }

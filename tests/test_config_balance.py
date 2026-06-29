@@ -504,3 +504,59 @@ def test_director_boss_spawn_time_negative_raises(tmp_path):
     with pytest.raises(ValueError) as exc:
         _load(tmp_path, balance)
     assert "boss_spawn_times" in str(exc.value)
+
+
+# --- Phase 4C commit 2: caster boss fire fields -------------------------------
+
+_CASTER_BLOCK = (
+    "\n[enemies.boss_caster]\n"
+    "hp = 300.0\n"
+    "move_speed = 1.2\n"
+    "spawn_weight = 1.0\n"
+    'glyph = "W"\n'
+    'color = "magenta"\n'
+    "boss = true\n"
+    "xp_value = 70.0\n"
+    "fire_cadence = 2.5\n"
+    "fire_damage = 8.0\n"
+    "fire_speed = 9.0\n"
+    "fire_ttl = 3.0\n"
+)
+
+
+def test_caster_fire_fields_parse(tmp_path):
+    """A caster boss's fire fields load into EnemyDef; a regular enemy defaults to
+    non-firing (fire_cadence 0)."""
+    cfg = _load(tmp_path, VALID_BALANCE + _CASTER_BLOCK)
+    c = cfg.defs.enemies["boss_caster"]
+    assert c.fire_cadence == 2.5
+    assert c.fire_damage == 8.0
+    assert c.fire_speed == 9.0
+    assert c.fire_ttl == 3.0
+    assert cfg.defs.enemies["walker"].fire_cadence == 0.0
+
+
+def test_firing_enemy_with_zero_fire_damage_raises(tmp_path):
+    """A firing enemy (fire_cadence > 0) with zero fire_damage emits no-op shots,
+    so it is rejected at load."""
+    bad = _CASTER_BLOCK.replace("fire_damage = 8.0", "fire_damage = 0")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "fire_damage" in str(exc.value)
+
+
+def test_negative_fire_cadence_raises(tmp_path):
+    """A negative fire_cadence would never tick down to a shot, so it is rejected."""
+    bad = _CASTER_BLOCK.replace("fire_cadence = 2.5", "fire_cadence = -1.0")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "fire_cadence" in str(exc.value)
+
+
+def test_non_firing_enemy_may_leave_fire_fields_zero(tmp_path):
+    """A regular enemy (fire_cadence 0) legitimately leaves the other fire fields
+    at 0 -- the positive-fire checks apply only to a firing enemy."""
+    cfg = _load(tmp_path)  # VALID_BALANCE's walker never fires
+    walker = cfg.defs.enemies["walker"]
+    assert walker.fire_cadence == 0.0
+    assert walker.fire_damage == 0.0

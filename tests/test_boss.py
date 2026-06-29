@@ -117,3 +117,160 @@ def test_regular_enemy_keeps_default_xp_value():
     _drop_xp_on_death(state, rng)
 
     assert state.pickups[0].xp == 1.0
+
+
+# --- Commit 2: caster boss + the enemy-projectile collision direction ---------
+
+
+def _defs_with_caster(*, boss_times=(60.0,), fire_cadence=1.0, fire_damage=8.0):
+    """A BalanceDefs with a regular walker plus a boss-flagged caster that fires
+    enemy projectiles (fire_cadence > 0)."""
+    return make_defs(
+        enemies={
+            "walker": EnemyDef("walker", 10.0, 2.5, 70.0, "z", "red"),
+            "boss_caster": EnemyDef(
+                "boss_caster",
+                300.0,
+                1.2,
+                1.0,
+                "W",
+                "magenta",
+                boss=True,
+                xp_value=70.0,
+                fire_cadence=fire_cadence,
+                fire_damage=fire_damage,
+                fire_speed=8.0,
+                fire_ttl=3.0,
+            ),
+        },
+        director=DirectorDef(
+            2.0, 0.4, (ReinforceStep(0, 1.0, 1),), boss_spawn_times=boss_times
+        ),
+    )
+
+
+def test_caster_boss_fires_an_enemy_projectile_toward_the_player():
+    """A caster boss (fire_cadence > 0) whose cooldown has elapsed shoots one
+    enemy-team projectile aimed at the player."""
+    from terminal_vs.sim.step import _fire_enemy_projectiles
+
+    cfg = make_config(defs=_defs_with_caster(fire_cadence=1.0))
+    rng = random.Random(0)
+    state = new_run(cfg, rng)  # player at the world origin
+    boss = make_enemy(state.alloc_id(), 10.0, 0.0, cfg.defs.enemies["boss_caster"])
+    boss.fire_cooldown = 0.0  # ready to fire this tick
+    state.enemies.append(boss)
+
+    _fire_enemy_projectiles(state, cfg, 1.0 / cfg.sim_tps, rng)
+
+    shots = [p for p in state.projectiles if p.team == "enemy"]
+    assert len(shots) == 1
+    assert shots[0].vx < 0  # boss at +x of the player -> shot travels toward -x
+
+
+def test_enemy_projectile_damages_the_player_with_no_enemies_present():
+    """An enemy-team projectile overlapping the player damages it and is consumed,
+    even when the enemy buffer is empty (the player is always present)."""
+    from terminal_vs.sim.state import TEAM_ENEMY, Projectile
+    from terminal_vs.sim.step import _resolve_collisions
+
+    cfg = make_config(defs=_defs_with_caster())
+    rng = random.Random(0)
+    state = new_run(cfg, rng)  # player at origin, no enemies
+    shot = Projectile(
+        state.alloc_id(), 0.0, 0.0, 0.0, 0.0, damage=9.0, ttl=1.0, team=TEAM_ENEMY
+    )
+    state.projectiles.append(shot)
+    hp_before = state.player.hp
+
+    _resolve_collisions(state, cfg)
+
+    assert state.player.hp == hp_before - 9.0  # took the enemy shot's damage
+    assert shot.ttl == 0.0  # consumed on hit
+
+
+def test_enemy_projectile_spares_other_enemies():
+    """An enemy-team projectile overlapping a bystander enemy does NOT damage it:
+    the projectile->enemy loop is restricted to player-team shots."""
+    from terminal_vs.sim.state import TEAM_ENEMY, Projectile
+    from terminal_vs.sim.step import _resolve_collisions
+
+    cfg = make_config(defs=_defs_with_caster())
+    rng = random.Random(0)
+    state = new_run(cfg, rng)
+    state.player.x, state.player.y = 100.0, 100.0  # player far from the action
+    bystander = make_enemy(state.alloc_id(), 0.0, 0.0, cfg.defs.enemies["walker"])
+    state.enemies.append(bystander)
+    shot = Projectile(
+        state.alloc_id(), 0.0, 0.0, 0.0, 0.0, damage=9.0, ttl=1.0, team=TEAM_ENEMY
+    )
+    state.projectiles.append(shot)
+    hp_before = bystander.hp
+
+    _resolve_collisions(state, cfg)
+
+    assert bystander.hp == hp_before  # the enemy shot does not hit enemies
+
+
+def test_player_projectile_still_hits_only_enemies():
+    """Regression: a player-team projectile still damages an enemy (the existing
+    direction is intact after adding the enemy->player direction)."""
+    from terminal_vs.sim.state import TEAM_PLAYER, Projectile
+    from terminal_vs.sim.step import _resolve_collisions
+
+    cfg = make_config(defs=_defs_with_caster())
+    rng = random.Random(0)
+    state = new_run(cfg, rng)
+    state.player.x, state.player.y = 100.0, 100.0  # keep the player out of contact
+    enemy = make_enemy(state.alloc_id(), 0.0, 0.0, cfg.defs.enemies["walker"])
+    state.enemies.append(enemy)
+    shot = Projectile(
+        state.alloc_id(), 0.0, 0.0, 0.0, 0.0, damage=6.0, ttl=1.0, team=TEAM_PLAYER
+    )
+    state.projectiles.append(shot)
+    hp_before = enemy.hp
+
+    _resolve_collisions(state, cfg)
+
+    assert enemy.hp == hp_before - 6.0  # player shot still damages enemies
+
+
+def test_boss_kind_is_a_weighted_pick_over_the_boss_pool():
+    """With two boss kinds, the boss spawn draws from the boss subset via the
+    injected rng, so different seeds can select different bosses."""
+    defs = make_defs(
+        enemies={
+            "walker": EnemyDef("walker", 10.0, 2.5, 70.0, "z", "red"),
+            "boss_tank": EnemyDef(
+                "boss_tank", 600.0, 1.6, 1.0, "M", "red", boss=True, xp_value=60.0
+            ),
+            "boss_caster": EnemyDef(
+                "boss_caster",
+                300.0,
+                1.2,
+                1.0,
+                "W",
+                "magenta",
+                boss=True,
+                xp_value=70.0,
+                fire_cadence=1.0,
+                fire_damage=8.0,
+                fire_speed=8.0,
+                fire_ttl=3.0,
+            ),
+        },
+        director=DirectorDef(
+            2.0, 0.4, (ReinforceStep(0, 1.0, 1),), boss_spawn_times=(0.05,)
+        ),
+    )
+    cfg = make_config(defs=defs)
+    picked = set()
+    for seed in range(20):
+        rng = random.Random(seed)
+        state = new_run(cfg, rng)
+        state.elapsed = 0.05
+        maybe_spawn(state, cfg, rng)
+        picked.update(
+            e.kind for e in state.enemies if e.kind in ("boss_tank", "boss_caster")
+        )
+    assert picked == {"boss_tank", "boss_caster"}  # both bosses selectable by seed

@@ -212,6 +212,22 @@ color        = "red"
 boss         = true
 xp_value     = 60.0       # large reward vs a regular 1.0 gem
 
+# Caster boss: lower hp than the tank but fires projectiles at the player
+# (fire_cadence > 0). When both bosses are defined the director's boss spawn is a
+# weighted pick between them, so a boss appearance is randomly the tank or caster.
+[enemies.boss_caster]
+hp           = 300.0
+move_speed   = 1.2
+spawn_weight = 1.0        # unused for a boss (excluded from the weighted pool)
+glyph        = "W"
+color        = "magenta"
+boss         = true
+xp_value     = 70.0
+fire_cadence = 2.5        # seconds between shots
+fire_damage  = 8.0
+fire_speed   = 9.0
+fire_ttl     = 3.0
+
 # Evolution rule: dagger at base_max_level + the attack_speed passive owned ->
 # the dagger_evolved weapon. Adding evolutions is data-only (no code changes).
 [evolution.dagger_x]
