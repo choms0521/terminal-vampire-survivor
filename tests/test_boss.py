@@ -1,13 +1,11 @@
-"""Phase 4C: boss spawning + large-XP drop.
+"""Phase 4C: boss spawning + large-XP drop + caster boss fire.
 
-Commit 1 (infra, this file's first tests): a boss-flagged enemy is excluded from
-the regular weighted spawn pool and spawned ONLY when the director's
-``boss_spawn_times`` threshold is crossed (once, guarded by ``_boss_alive``);
-killing it drops a large xp gem driven by ``EnemyDef.xp_value`` (data-driven,
-replacing the previously hardcoded ``_XP_GEM_VALUE``). Headless / deterministic.
-
-Commit 2 will add the caster boss + the enemy-projectile collision direction in
-this same file.
+A boss-flagged enemy is excluded from the regular weighted spawn pool and spawned
+ONLY when the director's ``boss_spawn_times`` threshold is crossed (once, guarded by
+``_boss_alive``); killing it drops a large xp gem driven by ``EnemyDef.xp_value``
+(data-driven, replacing the previously hardcoded ``_XP_GEM_VALUE``). A caster boss
+additionally fires enemy-team projectiles at the player, resolved against the player
+only. Headless / deterministic.
 """
 
 from __future__ import annotations

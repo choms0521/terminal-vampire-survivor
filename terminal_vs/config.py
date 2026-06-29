@@ -326,9 +326,11 @@ def _validate_enemy(name: str, e: dict) -> None:
     """Range validation for one enemy entry."""
     _require_positive(f"enemies.{name}.hp", e["hp"])
     _require_positive(f"enemies.{name}.move_speed", e["move_speed"])
-    # spawn_weight stays > 0 even for a boss (which is excluded from the weighted
-    # pool): the value is unused for a boss, but one positive-weight rule for every
-    # enemy is simpler than a boss-only exemption. xp_value is the death reward.
+    # spawn_weight stays > 0 even for a boss. A boss is excluded from the REGULAR
+    # weighted pool, but the boss-only pick at boss_spawn_times still weights by
+    # spawn_weight, so multiple bosses can be tuned relative to each other. One
+    # positive-weight rule for every enemy is simpler than a boss-only exemption.
+    # xp_value is the death reward.
     _require_positive(f"enemies.{name}.spawn_weight", e["spawn_weight"])
     _require_positive(f"enemies.{name}.xp_value", e["xp_value"])
     # A firing enemy (fire_cadence > 0, a caster boss) must carry a positive shot

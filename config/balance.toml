@@ -201,12 +201,12 @@ color        = "yellow"
 
 # Boss enemy: very high hp, slow, large xp reward. Excluded from the regular
 # weighted spawn pool (boss = true) and spawned only when the director crosses a
-# [director].boss_spawn_times mark. spawn_weight is unused for a boss but kept > 0
-# for the schema. Phase 4C commit 1 ships this tank boss; a caster boss follows.
+# [director].boss_spawn_times mark. spawn_weight does not feed the regular pool but
+# still weights the boss-only pick when more than one boss is defined.
 [enemies.boss_tank]
 hp           = 600.0
 move_speed   = 1.6        # slower than the player (walker 2.5 * 1.5) so it can be kited
-spawn_weight = 1.0        # unused for a boss (excluded from the weighted pool)
+spawn_weight = 1.0        # weights the boss-only pick; excluded from the regular pool
 glyph        = "M"
 color        = "red"
 boss         = true
@@ -218,7 +218,7 @@ xp_value     = 60.0       # large reward vs a regular 1.0 gem
 [enemies.boss_caster]
 hp           = 300.0
 move_speed   = 1.2
-spawn_weight = 1.0        # unused for a boss (excluded from the weighted pool)
+spawn_weight = 1.0        # weights the boss-only pick; excluded from the regular pool
 glyph        = "W"
 color        = "magenta"
 boss         = true
