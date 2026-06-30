@@ -515,6 +515,37 @@ def test_director_boss_spawn_time_negative_raises(tmp_path):
     assert "boss_spawn_times" in str(exc.value)
 
 
+def test_director_boss_spawn_times_scalar_raises(tmp_path):
+    """A scalar boss_spawn_times (e.g. 60.0 instead of [60.0]) is rejected with a
+    clear ValueError rather than a bare TypeError from enumerate()."""
+    balance = VALID_BALANCE.replace(
+        "reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+        "boss_spawn_times = 60.0\n"
+        "    reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+    )
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, balance)
+    msg = str(exc.value)
+    assert "boss_spawn_times" in msg
+    assert "config/balance.toml" in msg
+
+
+@pytest.mark.parametrize("bad_boss", ["1", '"false"'])
+def test_enemy_boss_non_bool_raises(tmp_path, bad_boss):
+    """A non-boolean boss flag (int 1 or string "false") is rejected at load.
+
+    build_defs casts boss with bool(...), so a truthy non-bool would silently turn
+    a regular enemy into a boss (excluded from the regular pool, schedule-only),
+    changing spawn partitioning and determinism. It must be a real true/false.
+    """
+    bad = _BOSS_BLOCK.replace("boss = true", f"boss = {bad_boss}")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    msg = str(exc.value)
+    assert "boss" in msg
+    assert "config/balance.toml" in msg
+
+
 # --- Phase 4C commit 2: caster boss fire fields -------------------------------
 
 _CASTER_BLOCK = (

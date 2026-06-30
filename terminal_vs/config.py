@@ -333,6 +333,17 @@ def _validate_enemy(name: str, e: dict) -> None:
     # xp_value is the death reward.
     _require_positive(f"enemies.{name}.spawn_weight", e["spawn_weight"])
     _require_positive(f"enemies.{name}.xp_value", e["xp_value"])
+    # boss must be a real boolean. build_defs casts it with bool(...), so a mistyped
+    # boss = "false" (a non-empty string) or boss = 1 would silently coerce to True
+    # and turn a regular enemy into a boss -- which changes spawn partitioning and
+    # determinism (a boss leaves the regular weighted pool and only spawns on a
+    # boss_spawn_times mark). Rejecting a non-bool at load time keeps that flag
+    # explicit. Mirrors the bool guard for fire_cadence/xp_value.
+    if not isinstance(e["boss"], bool):
+        raise ValueError(
+            f"config: enemies.{name}.boss must be a boolean (true/false), got "
+            f"{e['boss']!r} (check config/balance.toml)"
+        )
     # A firing enemy (fire_cadence > 0, a caster boss) must carry a positive shot
     # damage, speed, and ttl, else it would emit no-op projectiles. fire_cadence 0
     # is a non-firing enemy, which legitimately leaves the other fire fields at 0.
@@ -401,12 +412,19 @@ def _validate_reinforce_steps(steps) -> None:
 def _validate_boss_spawn_times(times) -> None:
     """Validate the director's boss spawn schedule.
 
-    Each mark is an elapsed-seconds value >= 0 at which a boss spawns. An empty
-    schedule is valid (no boss). A negative mark would never be crossed by the
-    monotonic elapsed timer (so the boss would never appear), and a bool sneaks
-    through ``isinstance(x, int)``, so both are rejected at load time naming the
-    offending index and config/balance.toml.
+    ``times`` must be a list/tuple of marks. Each mark is an elapsed-seconds value
+    >= 0 at which a boss spawns. An empty schedule is valid (no boss). A negative
+    mark would never be crossed by the monotonic elapsed timer (so the boss would
+    never appear), and a bool sneaks through ``isinstance(x, int)``, so both are
+    rejected at load time naming the offending index and config/balance.toml. A
+    scalar (e.g. ``boss_spawn_times = 60.0`` instead of ``[60.0]``) is rejected
+    upfront with a clear ValueError rather than a bare TypeError from enumerate.
     """
+    if not isinstance(times, (list, tuple)):
+        raise ValueError(
+            f"config: director.boss_spawn_times must be a list, got {times!r} "
+            f"(check config/balance.toml)"
+        )
     for idx, t in enumerate(times):
         if isinstance(t, bool) or not isinstance(t, (int, float)) or t < 0:
             raise ValueError(
