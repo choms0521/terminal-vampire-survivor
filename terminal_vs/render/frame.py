@@ -48,7 +48,19 @@ _FLOOR_COLOR = ""
 # swarm renders colored (Chunk 1 review follow-up); "cyan" is reserved for future
 # enemy/effect colors. "bright_black" (dim gray) colors the background dot lattice
 # so it never competes visually with the white player or colored enemies.
-_KNOWN_COLORS = ("white", "red", "yellow", "green", "magenta", "cyan", "bright_black")
+# "bright_yellow" is the xp-gem color: a bright gold that pops against the dim
+# floor dots, so a dropped pickup reads at a glance (a plain green gem on the old
+# "." glyph used to blend into the lattice).
+_KNOWN_COLORS = (
+    "white",
+    "red",
+    "yellow",
+    "green",
+    "magenta",
+    "cyan",
+    "bright_black",
+    "bright_yellow",
+)
 
 # Background dot lattice -- the "moving through a world" cue. A sparse grid of
 # points fixed in WORLD space; because the camera keeps the player centered, the
