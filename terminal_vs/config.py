@@ -87,6 +87,12 @@ _ENEMY_DEFAULTS: dict[str, object] = {
     "spawn_weight": 1.0,
     "glyph": "z",
     "color": "red",
+    "boss": False,
+    "xp_value": 1.0,
+    "fire_cadence": 0.0,
+    "fire_damage": 0.0,
+    "fire_speed": 0.0,
+    "fire_ttl": 0.0,
 }
 _EVOLUTION_DEFAULTS: dict[str, object] = {
     "base": "dagger",
@@ -183,8 +189,12 @@ def _require_positive(name: str, value: float) -> None:
     and sectioned (e.g. ``weapons.dagger.cooldown``) while operating-point keys
     are flat (e.g. ``sim_tps``), so the message names the file the bad value came
     from.
+
+    A bool is rejected explicitly: ``bool`` is a subclass of ``int``, so ``True``
+    would otherwise satisfy ``value <= 0`` as 1 and parse silently as 1.0. This
+    matches the explicit bool guard in :func:`_validate_boss_spawn_times`.
     """
-    if value <= 0:
+    if isinstance(value, bool) or value <= 0:
         source = "config/balance.toml" if "." in name else "config/tuning.toml"
         raise ValueError(
             f"config: {name} must be > 0, got {value!r} (check {source})"
@@ -316,7 +326,46 @@ def _validate_enemy(name: str, e: dict) -> None:
     """Range validation for one enemy entry."""
     _require_positive(f"enemies.{name}.hp", e["hp"])
     _require_positive(f"enemies.{name}.move_speed", e["move_speed"])
+    # spawn_weight stays > 0 even for a boss. A boss is excluded from the REGULAR
+    # weighted pool, but the boss-only pick at boss_spawn_times still weights by
+    # spawn_weight, so multiple bosses can be tuned relative to each other. One
+    # positive-weight rule for every enemy is simpler than a boss-only exemption.
+    # xp_value is the death reward.
     _require_positive(f"enemies.{name}.spawn_weight", e["spawn_weight"])
+    _require_positive(f"enemies.{name}.xp_value", e["xp_value"])
+    # boss must be a real boolean. build_defs casts it with bool(...), so a mistyped
+    # boss = "false" (a non-empty string) or boss = 1 would silently coerce to True
+    # and turn a regular enemy into a boss -- which changes spawn partitioning and
+    # determinism (a boss leaves the regular weighted pool and only spawns on a
+    # boss_spawn_times mark). Rejecting a non-bool at load time keeps that flag
+    # explicit. Mirrors the bool guard for fire_cadence/xp_value.
+    if not isinstance(e["boss"], bool):
+        raise ValueError(
+            f"config: enemies.{name}.boss must be a boolean (true/false), got "
+            f"{e['boss']!r} (check config/balance.toml)"
+        )
+    # A firing enemy (fire_cadence > 0, a caster boss) must carry a positive shot
+    # damage, speed, and ttl, else it would emit no-op projectiles. fire_cadence 0
+    # is a non-firing enemy, which legitimately leaves the other fire fields at 0.
+    # A negative cadence would never tick down to a shot, so it is rejected.
+    # Reject a bool before float(): bool is an int subclass, so fire_cadence=true
+    # would parse as 1.0 and silently turn a non-firing enemy into a caster. Mirrors
+    # the explicit bool guard for director.boss_spawn_times.
+    if isinstance(e["fire_cadence"], bool):
+        raise ValueError(
+            f"config: enemies.{name}.fire_cadence must be a number >= 0, got "
+            f"{e['fire_cadence']!r} (check config/balance.toml)"
+        )
+    fire_cadence = float(e["fire_cadence"])
+    if fire_cadence < 0.0:
+        raise ValueError(
+            f"config: enemies.{name}.fire_cadence must be >= 0, got "
+            f"{e['fire_cadence']!r} (check config/balance.toml)"
+        )
+    if fire_cadence > 0.0:
+        _require_positive(f"enemies.{name}.fire_damage", e["fire_damage"])
+        _require_positive(f"enemies.{name}.fire_speed", e["fire_speed"])
+        _require_positive(f"enemies.{name}.fire_ttl", e["fire_ttl"])
 
 
 def _validate_reinforce_steps(steps) -> None:
@@ -358,6 +407,30 @@ def _validate_reinforce_steps(steps) -> None:
                 f"{idx} (check config/balance.toml)"
             )
         prev_minute = minute
+
+
+def _validate_boss_spawn_times(times) -> None:
+    """Validate the director's boss spawn schedule.
+
+    ``times`` must be a list/tuple of marks. Each mark is an elapsed-seconds value
+    >= 0 at which a boss spawns. An empty schedule is valid (no boss). A negative
+    mark would never be crossed by the monotonic elapsed timer (so the boss would
+    never appear), and a bool sneaks through ``isinstance(x, int)``, so both are
+    rejected at load time naming the offending index and config/balance.toml. A
+    scalar (e.g. ``boss_spawn_times = 60.0`` instead of ``[60.0]``) is rejected
+    upfront with a clear ValueError rather than a bare TypeError from enumerate.
+    """
+    if not isinstance(times, (list, tuple)):
+        raise ValueError(
+            f"config: director.boss_spawn_times must be a list, got {times!r} "
+            f"(check config/balance.toml)"
+        )
+    for idx, t in enumerate(times):
+        if isinstance(t, bool) or not isinstance(t, (int, float)) or t < 0:
+            raise ValueError(
+                f"config: director.boss_spawn_times[{idx}] must be a number >= 0, "
+                f"got {t!r} (check config/balance.toml)"
+            )
 
 
 def _normalized_balance(balance_data: dict) -> dict:
@@ -466,6 +539,7 @@ def _normalized_balance(balance_data: dict) -> dict:
         "reinforce_steps": director_raw.get(
             "reinforce_steps", _DIRECTOR_DEFAULTS["reinforce_steps"]
         ),
+        "boss_spawn_times": director_raw.get("boss_spawn_times", []),
     }
     _require_positive("director.base_spawn_interval", director["base_spawn_interval"])
     _require_positive("director.min_spawn_interval", director["min_spawn_interval"])
@@ -475,6 +549,7 @@ def _normalized_balance(balance_data: dict) -> dict:
             "(check config/balance.toml)"
         )
     _validate_reinforce_steps(director["reinforce_steps"])
+    _validate_boss_spawn_times(director["boss_spawn_times"])
 
     pickup_raw = balance_data.get("pickup", {})
     magnet_range = _f(pickup_raw, "magnet_range", _PICKUP_DEFAULTS)

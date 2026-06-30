@@ -40,6 +40,8 @@ from ..rules.defs import BalanceDefs
 from .spatial import SpatialHash
 from .spawn import maybe_spawn
 from .state import (
+    TEAM_ENEMY,
+    TEAM_PLAYER,
     Effect,
     Enemy,
     Intent,
@@ -57,8 +59,6 @@ _ENEMY_TOUCH_RADIUS = 0.75
 _PLAYER_KNOCKBACK_FORCE = 1.5
 # Contact damage an enemy deals to the player on touch, per tick.
 _ENEMY_CONTACT_DAMAGE = 5.0
-# Xp value of a gem dropped on enemy death.
-_XP_GEM_VALUE = 1.0
 # Player base move speed as a multiple of the WALKER (basic chaser) move speed.
 # Strictly > 1 so the player can out-run walkers and kite -- the core survival
 # mechanic that keeps the vertical slice playable. The swarm enemy is
@@ -97,10 +97,11 @@ def step(state: SimState, intent: Intent, cfg: Config, rng: random.Random) -> No
     maybe_spawn(state, cfg, rng)                    # 2) spawn: director-driven (time-based rate + reinforce steps)
     _move_enemies_toward_player(state, cfg, dt)     # 3) enemy AI: chase at each kind's move speed
     _fire_weapons(state, cfg, dt, rng)              # 4) weapon: tick every owned weapon (projectiles + instant hits)
+    _fire_enemy_projectiles(state, cfg, dt, rng)    # 4b) enemy fire: a caster boss shoots at the player
     _advance_projectiles(state, dt)                 # 5) projectiles: move + ttl
     _advance_effects(state, dt)                     # 5b) visual effects: ttl countdown (no move, no collision)
     _resolve_collisions(state, cfg)                 # 6) collisions: pierce-aware proj<->enemy, enemy<->player+knockback
-    _drop_xp_on_death(state, rng)                   # 7) death->xp drop: fixed gem
+    _drop_xp_on_death(state, rng)                   # 7) death->xp drop: gem carries the dead enemy's xp_value (data-driven; a boss's is large)
     _collect_pickups(state, cfg)                    # 8) pickup->xp->level flag: magnet-passive-scaled
     _cleanup_dead_and_far(state, cfg)               # 9) cleanup: dead removal + far despawn
     state.camera.follow(state.player)               # 10) camera: final follow after knockback so the rendered frame is centered
@@ -273,6 +274,52 @@ def _fire_weapons(
             )
 
 
+# --- Stage 4b: enemy weapon fire (caster boss) -------------------------------
+def _fire_enemy_projectiles(
+    state: SimState, cfg: Config, dt: float, rng: random.Random
+) -> None:
+    """Tick each enemy's fire cooldown; a caster enemy (``fire_cadence`` > 0) shoots
+    one enemy-team projectile straight at the player when its cooldown elapses.
+
+    v1 aims directly at the player's CURRENT position (no lead, no spread, no
+    homing), so it draws no rng -- ``rng`` is accepted for future aim variety
+    (deferred), and a caster-free run's rng stream is unchanged. The shot inherits
+    the firing enemy's glyph/color so it reads as that boss's attack. Enemies are
+    iterated in list order for deterministic updates; the cooldown banks the next
+    cadence (``+=``) so a long catch-up dt cannot emit a burst.
+    """
+    px, py = state.player.x, state.player.y
+    for enemy in state.enemies:
+        edef = cfg.defs.enemies.get(enemy.kind)
+        if edef is None or edef.fire_cadence <= 0.0:
+            continue
+        enemy.fire_cooldown -= dt
+        if enemy.fire_cooldown > 0.0:
+            continue
+        enemy.fire_cooldown += edef.fire_cadence  # bank the next shot's cadence
+        dx = px - enemy.x
+        dy = py - enemy.y
+        dist = hypot(dx, dy)
+        if dist == 0.0:
+            continue  # degenerate overlap: skip this shot (cooldown already reset)
+        vx = dx / dist * edef.fire_speed
+        vy = dy / dist * edef.fire_speed
+        state.projectiles.append(
+            Projectile(
+                entity_id=state.alloc_id(),
+                x=enemy.x,
+                y=enemy.y,
+                vx=vx,
+                vy=vy,
+                damage=edef.fire_damage,
+                ttl=edef.fire_ttl,
+                team=TEAM_ENEMY,
+                glyph=edef.glyph,
+                color=edef.color,
+            )
+        )
+
+
 # --- Stage 5: projectile move + ttl ------------------------------------------
 def _advance_projectiles(state: SimState, dt: float) -> None:
     """Integrate projectile positions and decrement their ttl in place.
@@ -307,29 +354,45 @@ def _advance_effects(state: SimState, dt: float) -> None:
 
 # --- Stage 6: collision resolve ----------------------------------------------
 def _resolve_collisions(state: SimState, cfg: Config) -> None:
-    """Resolve projectile->enemy damage (pierce-aware) and enemy->player contact.
+    """Resolve projectile damage in BOTH directions plus enemy->player contact.
 
-    A spatial hash over enemies turns each projectile/player query into a
-    local-bucket scan (master section 5.3). Candidate ids come back sorted, so
-    resolution order is deterministic. A projectile damages the nearest live
-    in-radius enemy; if it still has pierce left it decrements pierce and
-    survives, otherwise it is consumed (ttl set to 0). Damage and knockback use
-    pure rules.damage.
+    Enemy-team projectiles (a caster boss's shots) damage the player on overlap and
+    are consumed; this resolves first and independently of the enemy buffer (the
+    player is always present), so it works even with no enemies alive. Player-team
+    projectiles then damage the nearest live in-radius enemy via a spatial hash
+    (pierce-aware). The team filter keeps enemy shots from hitting other enemies and
+    player shots from hitting the player. Finally enemy->player contact applies
+    touch damage + knockback. Candidate ids come back sorted, so resolution order is
+    deterministic. Damage and knockback use pure rules.damage.
     """
+    player = state.player
+
+    # Enemy-team projectile -> player: an enemy shot damages the player on overlap
+    # and is consumed. Independent of the enemy buffer (the player is always
+    # present), so it resolves even when no enemies are alive.
+    hit_r2 = _PROJECTILE_HIT_RADIUS * _PROJECTILE_HIT_RADIUS
+    for proj in state.projectiles:
+        if proj.ttl <= 0.0 or proj.team == TEAM_PLAYER:
+            continue
+        dx = player.x - proj.x
+        dy = player.y - proj.y
+        if dx * dx + dy * dy <= hit_r2:
+            player.hp = rules_damage.apply_hit(player.hp, proj.damage)
+            proj.ttl = 0.0  # consume the enemy shot on hit
+
     if not state.enemies:
         return
     grid = SpatialHash.build(state.enemies, _COLLISION_CELL_SIZE)
 
-    # Projectile -> enemy: each projectile damages the NEAREST live in-radius
-    # enemy (parity with weapon targeting). candidate_ids is sorted ascending and
-    # we only replace on a strictly smaller distance, so an exact distance tie
-    # breaks to the lowest id -- selection stays deterministic. A pierce>0
-    # projectile keeps going (decrement pierce); pierce==0 is consumed on hit.
-    # ``proj.hit_ids`` guards against re-hitting the same enemy across ticks: any
-    # enemy id already in the set is skipped during candidate selection, so a
-    # lingering pierce projectile can only damage each distinct enemy once.
+    # Player-team projectile -> enemy: each damages the NEAREST live in-radius enemy
+    # (parity with weapon targeting). candidate_ids is sorted ascending and we only
+    # replace on a strictly smaller distance, so an exact distance tie breaks to the
+    # lowest id -- selection stays deterministic. A pierce>0 projectile keeps going
+    # (decrement pierce); pierce==0 is consumed on hit. ``proj.hit_ids`` guards
+    # against re-hitting the same enemy across ticks. Enemy-team shots are skipped
+    # here (resolved above) so they never damage other enemies.
     for proj in state.projectiles:
-        if proj.ttl <= 0.0:
+        if proj.ttl <= 0.0 or proj.team != TEAM_PLAYER:
             continue
         candidate_ids = grid.query_near(proj.x, proj.y, _PROJECTILE_HIT_RADIUS)
         best_enemy = None
@@ -356,7 +419,6 @@ def _resolve_collisions(state: SimState, cfg: Config) -> None:
                 proj.ttl = 0.0  # consume the projectile on hit
 
     # Enemy -> player: contact damage + knockback pushing the player away.
-    player = state.player
     touch_ids = grid.query_near(player.x, player.y, _ENEMY_TOUCH_RADIUS)
     for enemy_id in touch_ids:  # sorted ascending
         enemy = _enemy_by_id(state, enemy_id)
@@ -378,8 +440,9 @@ def _drop_xp_on_death(state: SimState, rng: random.Random) -> None:
     tick. So iterating dead enemies here counts each kill exactly once -- the
     single home for the ``state.kills`` tally (HUD + run-outcome metric).
 
-    ``rng`` is accepted for future drop-table variety (deferred); a single
-    fixed-value gem is dropped per kill, so it is unused here.
+    ``rng`` is accepted for future drop-table variety (deferred); one gem carrying
+    the dead enemy's ``xp_value`` is dropped per kill (a boss's is much larger than
+    a mob's), so rng is unused here.
     """
     for enemy in state.enemies:
         if rules_damage.is_dead(enemy.hp):
@@ -389,7 +452,7 @@ def _drop_xp_on_death(state: SimState, rng: random.Random) -> None:
                     entity_id=state.alloc_id(),
                     x=enemy.x,
                     y=enemy.y,
-                    xp=_XP_GEM_VALUE,
+                    xp=enemy.xp_value,
                 )
             )
 

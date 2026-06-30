@@ -442,3 +442,187 @@ def test_reinforce_step_malformed_row_raises(tmp_path):
     msg = str(exc.value)
     assert "reinforce_steps" in msg
     assert "config/balance.toml" in msg
+
+
+# --- Phase 4C: boss enemy + xp_value + director boss schedule -----------------
+
+_BOSS_BLOCK = (
+    "\n[enemies.boss_tank]\n"
+    "hp = 600.0\n"
+    "move_speed = 1.6\n"
+    "spawn_weight = 1.0\n"
+    'glyph = "M"\n'
+    'color = "red"\n'
+    "boss = true\n"
+    "xp_value = 60.0\n"
+)
+
+
+def test_enemy_boss_flag_and_xp_value_parse(tmp_path):
+    """A boss-flagged enemy with an xp_value loads into EnemyDef with both set,
+    and a regular enemy defaults to non-boss with the 1.0 reward."""
+    cfg = _load(tmp_path, VALID_BALANCE + _BOSS_BLOCK)
+    boss = cfg.defs.enemies["boss_tank"]
+    assert boss.boss is True
+    assert boss.xp_value == 60.0
+    assert cfg.defs.enemies["walker"].boss is False
+    assert cfg.defs.enemies["walker"].xp_value == 1.0
+
+
+def test_enemy_xp_value_non_positive_raises(tmp_path):
+    """A non-positive xp_value (zero reward) is a balance error, rejected at load."""
+    bad = _BOSS_BLOCK.replace("xp_value = 60.0", "xp_value = 0")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "xp_value" in str(exc.value)
+
+
+def test_enemy_xp_value_bool_raises(tmp_path):
+    """xp_value = true must NOT slip through as 1.0 (bool is an int subclass), so a
+    boolean is rejected at load just like a non-positive value."""
+    bad = _BOSS_BLOCK.replace("xp_value = 60.0", "xp_value = true")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "xp_value" in str(exc.value)
+
+
+def test_director_boss_spawn_times_parse(tmp_path):
+    """[director].boss_spawn_times parses into the DirectorDef as a float tuple."""
+    balance = VALID_BALANCE.replace(
+        "reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+        "boss_spawn_times = [60.0, 120.0]\n"
+        "    reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+    )
+    cfg = _load(tmp_path, balance)
+    assert cfg.defs.director.boss_spawn_times == (60.0, 120.0)
+
+
+def test_director_boss_spawn_times_default_empty(tmp_path):
+    """Omitting boss_spawn_times yields an empty schedule (no boss spawns)."""
+    cfg = _load(tmp_path)  # VALID_BALANCE declares no boss_spawn_times
+    assert cfg.defs.director.boss_spawn_times == ()
+
+
+def test_director_boss_spawn_time_negative_raises(tmp_path):
+    """A negative boss spawn mark (never crossed by the elapsed timer) is rejected."""
+    balance = VALID_BALANCE.replace(
+        "reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+        "boss_spawn_times = [-5.0]\n"
+        "    reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+    )
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, balance)
+    assert "boss_spawn_times" in str(exc.value)
+
+
+def test_director_boss_spawn_times_scalar_raises(tmp_path):
+    """A scalar boss_spawn_times (e.g. 60.0 instead of [60.0]) is rejected with a
+    clear ValueError rather than a bare TypeError from enumerate()."""
+    balance = VALID_BALANCE.replace(
+        "reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+        "boss_spawn_times = 60.0\n"
+        "    reinforce_steps = [[0, 1.0, 1], [1, 0.8, 2]]",
+    )
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, balance)
+    msg = str(exc.value)
+    assert "boss_spawn_times" in msg
+    assert "config/balance.toml" in msg
+
+
+@pytest.mark.parametrize("bad_boss", ["1", '"false"'])
+def test_enemy_boss_non_bool_raises(tmp_path, bad_boss):
+    """A non-boolean boss flag (int 1 or string "false") is rejected at load.
+
+    build_defs casts boss with bool(...), so a truthy non-bool would silently turn
+    a regular enemy into a boss (excluded from the regular pool, schedule-only),
+    changing spawn partitioning and determinism. It must be a real true/false.
+    """
+    bad = _BOSS_BLOCK.replace("boss = true", f"boss = {bad_boss}")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    msg = str(exc.value)
+    assert "boss" in msg
+    assert "config/balance.toml" in msg
+
+
+# --- Phase 4C commit 2: caster boss fire fields -------------------------------
+
+_CASTER_BLOCK = (
+    "\n[enemies.boss_caster]\n"
+    "hp = 300.0\n"
+    "move_speed = 1.2\n"
+    "spawn_weight = 1.0\n"
+    'glyph = "W"\n'
+    'color = "magenta"\n'
+    "boss = true\n"
+    "xp_value = 70.0\n"
+    "fire_cadence = 2.5\n"
+    "fire_damage = 8.0\n"
+    "fire_speed = 9.0\n"
+    "fire_ttl = 3.0\n"
+)
+
+
+def test_caster_fire_fields_parse(tmp_path):
+    """A caster boss's fire fields load into EnemyDef; a regular enemy defaults to
+    non-firing (fire_cadence 0)."""
+    cfg = _load(tmp_path, VALID_BALANCE + _CASTER_BLOCK)
+    c = cfg.defs.enemies["boss_caster"]
+    assert c.fire_cadence == 2.5
+    assert c.fire_damage == 8.0
+    assert c.fire_speed == 9.0
+    assert c.fire_ttl == 3.0
+    assert cfg.defs.enemies["walker"].fire_cadence == 0.0
+
+
+def test_firing_enemy_with_zero_fire_damage_raises(tmp_path):
+    """A firing enemy (fire_cadence > 0) with zero fire_damage emits no-op shots,
+    so it is rejected at load."""
+    bad = _CASTER_BLOCK.replace("fire_damage = 8.0", "fire_damage = 0")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "fire_damage" in str(exc.value)
+
+
+def test_negative_fire_cadence_raises(tmp_path):
+    """A negative fire_cadence would never tick down to a shot, so it is rejected."""
+    bad = _CASTER_BLOCK.replace("fire_cadence = 2.5", "fire_cadence = -1.0")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "fire_cadence" in str(exc.value)
+
+
+def test_bool_fire_cadence_raises(tmp_path):
+    """fire_cadence = true must NOT parse as 1.0 (bool is an int subclass) and
+    silently turn a non-firing enemy into a caster, so a boolean is rejected."""
+    bad = _CASTER_BLOCK.replace("fire_cadence = 2.5", "fire_cadence = true")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "fire_cadence" in str(exc.value)
+
+
+def test_firing_enemy_with_zero_fire_speed_raises(tmp_path):
+    """A firing enemy with zero fire_speed emits a stationary shot, so it is rejected."""
+    bad = _CASTER_BLOCK.replace("fire_speed = 9.0", "fire_speed = 0")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "fire_speed" in str(exc.value)
+
+
+def test_firing_enemy_with_zero_fire_ttl_raises(tmp_path):
+    """A firing enemy with zero fire_ttl emits a shot culled before it travels, so
+    it is rejected at load."""
+    bad = _CASTER_BLOCK.replace("fire_ttl = 3.0", "fire_ttl = 0")
+    with pytest.raises(ValueError) as exc:
+        _load(tmp_path, VALID_BALANCE + bad)
+    assert "fire_ttl" in str(exc.value)
+
+
+def test_non_firing_enemy_may_leave_fire_fields_zero(tmp_path):
+    """A regular enemy (fire_cadence 0) legitimately leaves the other fire fields
+    at 0 -- the positive-fire checks apply only to a firing enemy."""
+    cfg = _load(tmp_path)  # VALID_BALANCE's walker never fires
+    walker = cfg.defs.enemies["walker"]
+    assert walker.fire_cadence == 0.0
+    assert walker.fire_damage == 0.0

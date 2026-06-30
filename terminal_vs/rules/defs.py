@@ -113,6 +113,10 @@ class EnemyDef:
 
     ``spawn_weight`` is the relative weight the director uses for weighted enemy
     selection; ``glyph`` and ``color`` are render hints consumed by sim/render.
+    ``boss`` flags a boss: it is excluded from the regular weighted spawn pool and
+    spawned only when a director ``boss_spawn_times`` mark is crossed. ``xp_value``
+    is the xp dropped on death (a boss's is far larger than a mob's); it defaults
+    to 1.0 so existing enemies keep the historical single-gem reward.
     """
 
     name: str
@@ -121,6 +125,16 @@ class EnemyDef:
     spawn_weight: float  # relative weight for weighted spawn selection
     glyph: str
     color: str
+    boss: bool = False
+    xp_value: float = 1.0
+    # Enemy projectile fire (a caster boss). ``fire_cadence`` is the seconds between
+    # shots (0 = never fires -- the default for regular enemies and a melee boss);
+    # a shot is aimed straight at the player at ``fire_speed``, deals ``fire_damage``,
+    # and lives ``fire_ttl`` seconds.
+    fire_cadence: float = 0.0
+    fire_damage: float = 0.0
+    fire_speed: float = 0.0
+    fire_ttl: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -165,6 +179,10 @@ class DirectorDef:
     base_spawn_interval: float
     min_spawn_interval: float
     reinforce_steps: tuple[ReinforceStep, ...]
+    # Elapsed-seconds marks at which a boss spawns (each crossed once). Empty = no
+    # boss schedule, so the director never sets boss_due and a boss-free balance
+    # behaves exactly as before.
+    boss_spawn_times: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -296,6 +314,12 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
             spawn_weight=float(e["spawn_weight"]),
             glyph=str(e["glyph"]),
             color=str(e["color"]),
+            boss=bool(e.get("boss", False)),
+            xp_value=float(e.get("xp_value", 1.0)),
+            fire_cadence=float(e.get("fire_cadence", 0.0)),
+            fire_damage=float(e.get("fire_damage", 0.0)),
+            fire_speed=float(e.get("fire_speed", 0.0)),
+            fire_ttl=float(e.get("fire_ttl", 0.0)),
         )
         for name, e in enemies_raw.items()
     }
@@ -323,6 +347,9 @@ def build_defs(raw_balance: dict) -> BalanceDefs:
         base_spawn_interval=float(director_raw["base_spawn_interval"]),
         min_spawn_interval=float(director_raw["min_spawn_interval"]),
         reinforce_steps=steps,
+        boss_spawn_times=tuple(
+            float(t) for t in director_raw.get("boss_spawn_times", ())
+        ),
     )
 
     leveling = LevelingDef(

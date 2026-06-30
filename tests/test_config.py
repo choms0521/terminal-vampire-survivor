@@ -232,3 +232,15 @@ def test_shipped_config_loads_and_validates():
     assert upgrades["fury"].stat == "attack_speed"
     assert upgrades["fury"].cost_base == 60
     assert cfg.defs.gold_per_kill == 1  # Phase 4A: gold banked per enemy kill
+
+    # Phase 4C: the tank boss + boss schedule parse from the shipped balance.toml.
+    boss = cfg.defs.enemies["boss_tank"]
+    assert boss.boss is True
+    assert boss.xp_value == 60.0  # large reward vs a regular 1.0 gem
+    assert cfg.defs.director.boss_spawn_times == (60.0, 120.0)
+
+    # Phase 4C commit 2: the caster boss (fires enemy projectiles) ships too.
+    caster = cfg.defs.enemies["boss_caster"]
+    assert caster.boss is True
+    assert caster.fire_cadence == 2.5
+    assert caster.fire_damage == 8.0

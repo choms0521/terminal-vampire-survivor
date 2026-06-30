@@ -48,12 +48,16 @@ class SpawnParams:
 
     ``spawn_interval`` is the seconds between spawn waves (smaller = faster);
     ``concurrent`` is how many enemies spawn together each wave; ``enemy_weights``
-    is the ordered ``(name, weight)`` table the weighted kind pick draws from.
+    is the ordered ``(name, weight)`` table of REGULAR enemies the weighted kind
+    pick draws from. ``boss_due`` is True on the tick that crosses a boss spawn
+    mark; ``boss_weights`` is the ordered boss-only subset drawn from then.
     """
 
     spawn_interval: float
     concurrent: int
     enemy_weights: tuple[tuple[str, float], ...]
+    boss_due: bool = False
+    boss_weights: tuple[tuple[str, float], ...] = ()
 
 
 def _current_reinforce_step(elapsed_sec: float, director: DirectorDef):
@@ -74,14 +78,23 @@ def _current_reinforce_step(elapsed_sec: float, director: DirectorDef):
     return active
 
 
-def director_params(elapsed_sec: float, defs: BalanceDefs) -> SpawnParams:
+def director_params(
+    elapsed_sec: float, defs: BalanceDefs, prev_elapsed: float = 0.0
+) -> SpawnParams:
     """Map elapsed survival time to the current :class:`SpawnParams` (pure).
 
     The active per-minute reinforce step scales the base spawn interval down
     (bounded below by ``min_spawn_interval``) and sets the concurrent count, so
-    the spawn rate rises over time. ``enemy_weights`` is built from each enemy
-    def's ``spawn_weight`` (a balance dial). Pure: ``defs`` is read-only and the
-    result depends only on ``elapsed_sec`` + ``defs``.
+    the spawn rate rises over time. Pure: ``defs`` is read-only and the result
+    depends only on ``elapsed_sec``, ``prev_elapsed``, and ``defs``.
+
+    The enemy table is PARTITIONED: ``enemy_weights`` holds only the regular
+    (non-boss) enemies the per-wave weighted pick draws from, while ``boss_weights``
+    holds the boss-flagged subset drawn from only when ``boss_due`` fires.
+    ``boss_due`` is True on the single tick whose (``prev_elapsed``, ``elapsed_sec``]
+    window contains a ``director.boss_spawn_times`` mark -- and only when boss
+    enemies exist, so a boss-free balance never trips it (``prev_elapsed`` defaults
+    to 0.0, preserving the Phase 2 two-argument call sites).
     """
     director = defs.director
     step = _current_reinforce_step(elapsed_sec, director)
@@ -89,19 +102,38 @@ def director_params(elapsed_sec: float, defs: BalanceDefs) -> SpawnParams:
         director.min_spawn_interval,
         director.base_spawn_interval * step.interval_mult,
     )
-    # Sorted by name so the weighted pick is independent of dict insertion order.
-    # This ordering is load-bearing for determinism: the cumulative-weight walk
-    # in _weighted_pick must traverse the table in the same order every call.
-    enemy_weights = tuple(
+    # Partition the enemy table into the regular weighted pool and the boss subset.
+    # Both are sorted by name so the cumulative-weight walk in _weighted_pick is
+    # deterministic (independent of dict insertion order) -- load-bearing.
+    regular = tuple(
         sorted(
-            ((name, edef.spawn_weight) for name, edef in defs.enemies.items()),
+            (
+                (name, edef.spawn_weight)
+                for name, edef in defs.enemies.items()
+                if not edef.boss
+            ),
             key=lambda nw: nw[0],
         )
+    )
+    bosses = tuple(
+        sorted(
+            (
+                (name, edef.spawn_weight)
+                for name, edef in defs.enemies.items()
+                if edef.boss
+            ),
+            key=lambda nw: nw[0],
+        )
+    )
+    boss_due = bool(bosses) and any(
+        prev_elapsed < t <= elapsed_sec for t in director.boss_spawn_times
     )
     return SpawnParams(
         spawn_interval=interval,
         concurrent=step.concurrent,
-        enemy_weights=enemy_weights,
+        enemy_weights=regular,
+        boss_due=boss_due,
+        boss_weights=bosses,
     )
 
 
@@ -136,6 +168,36 @@ def _total_entities(state: SimState) -> int:
     )
 
 
+def _spawn_ring_radius(state: SimState, cfg: Config) -> float:
+    """Radius of the off-screen spawn ring for the current camera/viewport.
+
+    Half the larger visible extent plus ``_RING_MARGIN`` so a point on the ring sits
+    just off-screen on every side. Draws no ``rng`` and depends only on the camera
+    and viewport, both of which are constant across a single spawn wave, so a caller
+    spawning ``concurrent`` enemies can compute this ONCE before the loop rather than
+    per enemy.
+    """
+    bounds = visible_bounds(state.camera, cfg)
+    half_w = (bounds.max_x - bounds.min_x) / 2.0
+    half_h = (bounds.max_y - bounds.min_y) / 2.0
+    return max(half_w, half_h) + _RING_MARGIN
+
+
+def _ring_point(
+    state: SimState, ring_radius: float, rng: random.Random
+) -> tuple[float, float]:
+    """A random point on the spawn ring at ``ring_radius``.
+
+    The angle draws once from ``rng``, so a caller that picks a kind first keeps a
+    fixed (kind, angle) rng draw order -- load-bearing for determinism.
+    """
+    angle = rng.random() * 2.0 * math.pi
+    return (
+        state.camera.x + math.cos(angle) * ring_radius,
+        state.camera.y + math.sin(angle) * ring_radius,
+    )
+
+
 def spawn_enemies(
     state: SimState, params: SpawnParams, cfg: Config, rng: random.Random
 ) -> None:
@@ -161,13 +223,10 @@ def spawn_enemies(
     if sum(weight for _, weight in params.enemy_weights) <= 0:
         return
 
-    bounds = visible_bounds(state.camera, cfg)
-    # Ring radius: half the larger visible extent plus a margin, so the spawn
-    # sits just outside the viewport on every side.
-    half_w = (bounds.max_x - bounds.min_x) / 2.0
-    half_h = (bounds.max_y - bounds.min_y) / 2.0
-    ring_radius = max(half_w, half_h) + _RING_MARGIN
-
+    # The ring radius is constant across the wave (camera/viewport do not move while
+    # spawning), so compute it once here rather than per enemy. Only the per-enemy
+    # angle draws from rng, inside _ring_point, preserving the (kind, angle) order.
+    ring_radius = _spawn_ring_radius(state, cfg)
     for _ in range(params.concurrent):
         if _total_entities(state) >= cfg.entity_cap:
             return
@@ -175,12 +234,48 @@ def spawn_enemies(
         enemy_def = cfg.defs.enemies.get(kind)
         if enemy_def is None:
             continue
-        angle = rng.random() * 2.0 * math.pi
-        spawn_x = state.camera.x + math.cos(angle) * ring_radius
-        spawn_y = state.camera.y + math.sin(angle) * ring_radius
+        spawn_x, spawn_y = _ring_point(state, ring_radius, rng)
         state.enemies.append(
             make_enemy(state.alloc_id(), spawn_x, spawn_y, enemy_def)
         )
+
+
+def _boss_alive(state: SimState, defs: BalanceDefs) -> bool:
+    """True if a boss-flagged enemy is currently alive in the buffer.
+
+    The director keeps at most one boss alive at a time: this guard makes a second
+    boss_due crossing a no-op while the first boss still lives.
+    """
+    for enemy in state.enemies:
+        edef = defs.enemies.get(enemy.kind)
+        if edef is not None and edef.boss:
+            return True
+    return False
+
+
+def _spawn_boss(
+    state: SimState, params: SpawnParams, cfg: Config, rng: random.Random
+) -> None:
+    """Spawn one boss on the off-screen ring (in place), kind chosen by weighted
+    pick over the boss subset. Respects ``cfg.entity_cap``. Deterministic: the kind
+    then the ring angle draw from ``rng`` in that order.
+    """
+    if not params.boss_weights:
+        return
+    # Non-positive total weight: nothing to draw from. Mirrors the same guard in
+    # spawn_enemies -- config validates each spawn_weight > 0, but a directly-built
+    # BalanceDefs (e.g. a test) could carry zero/negative boss weights, and
+    # _weighted_pick on a zero-total table would make an undefined selection.
+    if sum(weight for _, weight in params.boss_weights) <= 0:
+        return
+    if _total_entities(state) >= cfg.entity_cap:
+        return
+    kind = _weighted_pick(params.boss_weights, rng)
+    enemy_def = cfg.defs.enemies.get(kind)
+    if enemy_def is None:
+        return
+    spawn_x, spawn_y = _ring_point(state, _spawn_ring_radius(state, cfg), rng)
+    state.enemies.append(make_enemy(state.alloc_id(), spawn_x, spawn_y, enemy_def))
 
 
 def maybe_spawn(state: SimState, cfg: Config, rng: random.Random) -> None:
@@ -195,8 +290,15 @@ def maybe_spawn(state: SimState, cfg: Config, rng: random.Random) -> None:
     the start of the tick, before step advances it).
     """
     dt = 1.0 / cfg.sim_tps
-    params = director_params(state.elapsed, cfg.defs)
+    params = director_params(state.elapsed, cfg.defs, prev_elapsed=state.elapsed - dt)
     state.spawn_accumulator += dt
     while state.spawn_accumulator >= params.spawn_interval:
         state.spawn_accumulator -= params.spawn_interval
         spawn_enemies(state, params, cfg, rng)
+    # Boss spawn is OFF the wave accumulator: evaluated once per tick on the
+    # (prev, now] crossing of a boss_spawn_times mark, guarded so only one boss
+    # lives at a time. Drawn AFTER the regular waves so a boss-free balance
+    # (boss_due always False -> no boss rng draw) leaves the existing seeded spawn
+    # stream unchanged.
+    if params.boss_due and not _boss_alive(state, cfg.defs):
+        _spawn_boss(state, params, cfg, rng)

@@ -118,6 +118,7 @@ class Enemy:
         kind: str = "walker",
         glyph: str = "z",
         color: str = "red",
+        xp_value: float = 1.0,
     ) -> None:
         self.id: int = entity_id
         self.x: float = x
@@ -129,6 +130,13 @@ class Enemy:
         self.team: str = TEAM_ENEMY
         self.glyph: str = glyph
         self.color: str = color
+        # Xp dropped when this enemy dies (stamped from EnemyDef.xp_value): a boss
+        # carries a much larger value than a regular mob.
+        self.xp_value: float = xp_value
+        # Seconds until this enemy can fire again (a caster boss; counts down in
+        # step). Starts at 0.0 so a freshly spawned caster can fire on its first
+        # eligible tick. A non-firing enemy (fire_cadence 0) never reads it.
+        self.fire_cooldown: float = 0.0
 
 
 def make_enemy(entity_id: int, x: float, y: float, enemy_def: EnemyDef) -> Enemy:
@@ -146,6 +154,7 @@ def make_enemy(entity_id: int, x: float, y: float, enemy_def: EnemyDef) -> Enemy
         kind=enemy_def.name,
         glyph=enemy_def.glyph,
         color=enemy_def.color,
+        xp_value=enemy_def.xp_value,
     )
 
 
