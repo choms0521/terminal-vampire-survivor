@@ -82,7 +82,7 @@ class Player:
         x: float,
         y: float,
         hp: float,
-        glyph: str = "@",
+        glyph: str = "☻",
         color: str = "white",
     ) -> None:
         self.id: int = entity_id
@@ -221,8 +221,8 @@ class Pickup:
         x: float,
         y: float,
         xp: float,
-        glyph: str = ".",
-        color: str = "green",
+        glyph: str = "✦",
+        color: str = "bright_yellow",
     ) -> None:
         self.id: int = entity_id
         self.x: float = x

@@ -51,7 +51,7 @@ projectile_count = 1
 projectile_speed = 10.0
 projectile_ttl   = 1.6
 targeting        = "nearest_or_random"
-glyph            = "*"        # arcane bolt
+glyph            = "✱"        # arcane bolt
 color            = "cyan"
 
 [weapons.swing]
@@ -123,7 +123,7 @@ projectile_count = 8       # 8 shots spaced 45 deg apart around the player
 projectile_speed = 9.0
 projectile_ttl   = 1.0
 targeting        = "radial"
-glyph            = "o"
+glyph            = "✺"
 color            = "magenta"
 
 # Orbit: a defensive aura of glyphs that revolve around the player (targeting
@@ -207,7 +207,7 @@ color        = "yellow"
 hp           = 600.0
 move_speed   = 1.6        # slower than the player (walker 2.5 * 1.5) so it can be kited
 spawn_weight = 1.0        # weights the boss-only pick; excluded from the regular pool
-glyph        = "M"
+glyph        = "◉"
 color        = "red"
 boss         = true
 xp_value     = 60.0       # large reward vs a regular 1.0 gem
@@ -219,7 +219,7 @@ xp_value     = 60.0       # large reward vs a regular 1.0 gem
 hp           = 300.0
 move_speed   = 1.2
 spawn_weight = 1.0        # weights the boss-only pick; excluded from the regular pool
-glyph        = "W"
+glyph        = "✸"
 color        = "magenta"
 boss         = true
 xp_value     = 70.0
