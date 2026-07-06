@@ -54,6 +54,7 @@ _TUNING_DEFAULTS: dict[str, object] = {
     "entity_cap": 200,
     "aspect_x": 2.0,
     "render_mode": "diff",
+    "glyph_set": "ascii",
 }
 
 # Balance fallbacks, grouped by table section (mirrors config/balance.toml). A
@@ -151,12 +152,26 @@ class Config:
     sim_tps: float        # simulation ticks per second
     poll_timeout: float   # input poll timeout in seconds
     max_catchup: int      # max sim catch-up ticks per render frame
-    viewport_w: int       # viewport width in cells
+    viewport_w: int       # EFFECTIVE logical grid width in cells (after glyph-set normalization)
     viewport_h: int       # viewport height in cells
     entity_cap: int       # max simultaneous entities
-    aspect_x: float       # horizontal cell aspect compensation factor (section 3.1)
+    aspect_x: float       # EFFECTIVE horizontal aspect factor (after normalization, section 3.1)
     render_mode: str      # "full" | "diff"
     defs: BalanceDefs     # immutable balance tables built from balance.toml
+    # Render glyph set (opt-in). "ascii" is the shipped default and fallback;
+    # "emoji" maps entity glyphs to 2-column emoji at the render output stage.
+    # These trail the required fields (with defaults) so existing direct Config
+    # construction in tests stays valid without passing them.
+    glyph_set: str = "ascii"  # "ascii" | "emoji"
+    cell_width: int = 1       # terminal columns each logical cell emits (1 ascii, 2 emoji)
+
+    @property
+    def render_cols(self) -> int:
+        """Terminal columns a full row occupies: ``viewport_w`` logical cells, each
+        ``cell_width`` columns wide. Equals ``viewport_w`` in ascii mode. Render
+        padding/centering uses this (not ``viewport_w``) so rows stay column-stable
+        when a logical cell emits more than one terminal column (emoji mode)."""
+        return self.viewport_w * self.cell_width
 
 
 def _load_toml(path: str | Path) -> dict:
@@ -600,7 +615,11 @@ def _build_defs(balance_data: dict) -> BalanceDefs:
     return build_defs(_normalized_balance(balance_data))
 
 
-def load_config(tuning_path: str | Path, balance_path: str | Path) -> Config:
+def load_config(
+    tuning_path: str | Path,
+    balance_path: str | Path,
+    glyph_set_override: str | None = None,
+) -> Config:
     """Load and validate both TOML files into a frozen :class:`Config`.
 
     Missing keys (or a missing file) fall back to code defaults. Out-of-range
@@ -609,13 +628,19 @@ def load_config(tuning_path: str | Path, balance_path: str | Path) -> Config:
     Args:
         tuning_path: path to the operating-point TOML (tuning.toml).
         balance_path: path to the game-balance TOML (balance.toml).
+        glyph_set_override: optional startup override for ``glyph_set`` (from the
+            ``TVS_GLYPH_SET`` env var, read in ``__main__``). When set (non-empty)
+            it wins over the TOML value, so a user can opt into emoji mode without
+            editing tracked config. An invalid value flows into the same
+            validation path as an invalid TOML ``glyph_set``.
 
     Returns:
         An immutable :class:`Config`.
 
     Raises:
-        ValueError: if a rate/size value is not strictly positive, or a weapon
-            declares an unknown targeting strategy.
+        ValueError: if a rate/size value is not strictly positive, a weapon
+            declares an unknown targeting strategy, ``glyph_set`` is unknown, or
+            the raw ``viewport_w`` is not divisible by the glyph set's cell width.
     """
     tuning = _load_toml(tuning_path)
     balance_data = _load_toml(balance_path)
@@ -623,10 +648,12 @@ def load_config(tuning_path: str | Path, balance_path: str | Path) -> Config:
     sim_tps = _f(tuning, "sim_tps", _TUNING_DEFAULTS)
     poll_timeout = _f(tuning, "poll_timeout", _TUNING_DEFAULTS)
     max_catchup = _i(tuning, "max_catchup", _TUNING_DEFAULTS)
-    viewport_w = _i(tuning, "viewport_w", _TUNING_DEFAULTS)
+    # RAW terminal-column budget authored in tuning.toml. The EFFECTIVE logical
+    # grid (Config.viewport_w / aspect_x) is derived below by glyph-set width.
+    raw_viewport_w = _i(tuning, "viewport_w", _TUNING_DEFAULTS)
     viewport_h = _i(tuning, "viewport_h", _TUNING_DEFAULTS)
     entity_cap = _i(tuning, "entity_cap", _TUNING_DEFAULTS)
-    aspect_x = _f(tuning, "aspect_x", _TUNING_DEFAULTS)
+    raw_aspect_x = _f(tuning, "aspect_x", _TUNING_DEFAULTS)
     render_mode = str(tuning.get("render_mode", _TUNING_DEFAULTS["render_mode"]))
     if render_mode not in ("full", "diff"):
         raise ValueError(
@@ -634,25 +661,56 @@ def load_config(tuning_path: str | Path, balance_path: str | Path) -> Config:
             f"(check config/tuning.toml)"
         )
 
-    # Range validation: rates and sizes must be strictly positive.
+    # Glyph set: an env override (mirroring TVS_SEED) wins over the TOML value so a
+    # user can opt into emoji mode without editing tracked config; otherwise the
+    # tuning file (default "ascii") decides. Empty override -> falls back to TOML.
+    glyph_set = glyph_set_override or str(
+        tuning.get("glyph_set", _TUNING_DEFAULTS["glyph_set"])
+    )
+    if glyph_set not in ("ascii", "emoji"):
+        raise ValueError(
+            f"config: glyph_set must be 'ascii' or 'emoji', got {glyph_set!r} "
+            f"(check config/tuning.toml)"
+        )
+
+    # Range validation: rates and sizes must be strictly positive. The RAW
+    # viewport_w / aspect_x are validated before normalization derives the grid.
     _require_positive("sim_tps", sim_tps)
     _require_positive("poll_timeout", poll_timeout)
     _require_positive("max_catchup", max_catchup)
-    _require_positive("viewport_w", viewport_w)
+    _require_positive("viewport_w", raw_viewport_w)
     _require_positive("viewport_h", viewport_h)
     _require_positive("entity_cap", entity_cap)
-    _require_positive("aspect_x", aspect_x)
+    _require_positive("aspect_x", raw_aspect_x)
+
+    # Glyph-set normalization (single source of truth = cell_width): each logical
+    # cell emits cell_width terminal columns, so the effective logical grid width
+    # is the raw column budget divided by cell_width, and the aspect factor divides
+    # too (an emoji is ~2x as wide as an ascii cell, so halving aspect_x keeps
+    # on-screen distances proportionate). For ascii cell_width == 1 -> effective
+    # equals raw and every current value is preserved.
+    cell_width = 2 if glyph_set == "emoji" else 1
+    if raw_viewport_w % cell_width != 0:
+        raise ValueError(
+            f"config: viewport_w ({raw_viewport_w}) must be divisible by cell_width "
+            f"({cell_width}) for glyph_set={glyph_set!r} -- each logical cell emits "
+            f"cell_width terminal columns (check config/tuning.toml)"
+        )
+    effective_viewport_w = raw_viewport_w // cell_width
+    effective_aspect_x = raw_aspect_x / cell_width
 
     return Config(
         sim_tps=sim_tps,
         poll_timeout=poll_timeout,
         max_catchup=max_catchup,
-        viewport_w=viewport_w,
+        viewport_w=effective_viewport_w,
         viewport_h=viewport_h,
         entity_cap=entity_cap,
-        aspect_x=aspect_x,
+        aspect_x=effective_aspect_x,
         render_mode=render_mode,
         defs=_build_defs(balance_data),
+        glyph_set=glyph_set,
+        cell_width=cell_width,
     )
 
 
@@ -664,7 +722,16 @@ def _repo_config_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "config"
 
 
-def load_default_config() -> Config:
-    """Load the repo's ``config/tuning.toml`` and ``config/balance.toml``."""
+def load_default_config(glyph_set_override: str | None = None) -> Config:
+    """Load the repo's ``config/tuning.toml`` and ``config/balance.toml``.
+
+    ``glyph_set_override`` (from ``TVS_GLYPH_SET``, read in ``__main__``) opts into
+    a render glyph set at launch without editing tracked config; it flows into the
+    same load-time normalization/validation as the TOML ``glyph_set``.
+    """
     config_dir = _repo_config_dir()
-    return load_config(config_dir / "tuning.toml", config_dir / "balance.toml")
+    return load_config(
+        config_dir / "tuning.toml",
+        config_dir / "balance.toml",
+        glyph_set_override=glyph_set_override,
+    )

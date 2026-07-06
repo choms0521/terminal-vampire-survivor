@@ -7,9 +7,17 @@ This module composites the visible simulation into a flicker-free terminal frame
     grid and a plain frame string. It takes NO ``term`` and never touches
     blessed, so it is unit-tested headlessly (tests/test_render_frame.py).
   * A thin blessed emitter (``render_frame``) that colorizes the pure cell grid,
-    pads each row to the fixed viewport width, and emits the whole frame after a
-    single ``term.home`` (NO full-screen clear -> no flicker, master 3.6). It
-    returns the emitted string so a no-TTY smoke test can assert it is non-empty.
+    pads each row to the fixed terminal-column width, and emits the whole frame
+    after a single ``term.home`` (NO full-screen clear -> no flicker, master 3.6).
+    It returns the emitted string so a no-TTY smoke test can assert it is non-empty.
+
+Logical cells vs terminal columns: the cell grid is ``viewport_h`` x
+``viewport_w`` LOGICAL cells, but each cell emits ``cfg.cell_width`` TERMINAL
+columns at output time (1 in the default "ascii" glyph set, 2 in "emoji" where a
+2-column emoji replaces an entity glyph). ``_cell_to_columns`` performs that
+conversion, always emitting exactly ``cfg.cell_width`` columns per cell so a full
+row is ``cfg.render_cols`` columns wide -- the invariant the no-clear redraw needs
+so a moving wide glyph never leaves a stale second column behind.
 
 Draw priority (later overwrites earlier, master 3.4):
 ``floor < pickups < enemies < projectiles < player < HUD``. The player is ALWAYS
@@ -27,12 +35,17 @@ from __future__ import annotations
 
 import math
 
+from wcwidth import wcswidth
+
 from ..config import Config
 from ..world import Camera, cell_to_world, is_visible, world_to_cell
 from .hud import draft_overlay_lines, hud_lines, overlay_lines
 
 # Empty floor cell. A single space both reads as "no entity here" and, once rows
 # are padded to the fixed width, erases any ghost glyph left from a prior frame.
+# At output time a floor cell emits ``cfg.cell_width`` terminal columns (one space
+# in ascii, two in emoji), so it fully overwrites a wide glyph that just vacated
+# the cell -- see ``_cell_to_columns``.
 _FLOOR_GLYPH = " "
 # Floor cells are UNCOLORED: the empty color name is not in _KNOWN_COLORS, so the
 # blessed emitter returns the bare space with no SGR escape. Coloring the
@@ -76,6 +89,64 @@ _DOT_GLYPH = "·"  # middle dot
 _DOT_COLOR = "bright_black"
 _DOT_SPACING_X = 4.0  # world units; scaled by aspect_x -> ~8 cells between columns
 _DOT_SPACING_Y = 3.0  # world units; maps 1:1 to rows -> 3 rows between dot rows
+
+# Render-layer glyph -> emoji map (emoji glyph set only). Keyed by the ascii/unicode
+# glyph the sim/balance layers already carry, so nothing upstream (balance.toml,
+# rules.defs, sim.state, make_enemy, conftest) changes -- on-screen glyphs are
+# unique, so a by-glyph dict is a sufficient supply model. Unmapped glyphs
+# (projectiles like "-" ">" "=" "#" "O" plus the arcane "✱"/"✺") stay ascii and are
+# padded to cell_width columns. Each emoji here is a 2-column (wcswidth == 2) cell.
+_EMOJI_GLYPHS = {
+    "☻": "🙂",  # player
+    "✦": "💎",  # xp-gem pickup
+    "z": "🧟",  # walker enemy
+    "x": "🦇",  # swarm enemy
+    "B": "👹",  # brute enemy
+    "◉": "🐗",  # tank boss
+    "✸": "🧙",  # caster boss
+}
+
+
+def _display_glyph(glyph: str, cfg: Config) -> str:
+    """Map a logical cell glyph to its display glyph for the active glyph set.
+
+    Ascii mode returns the glyph unchanged; emoji mode substitutes a mapped emoji
+    (unmapped glyphs pass through). No colorizing here -- only glyph selection, so
+    width can be measured on the raw display glyph before ansi escapes are added.
+    """
+    if cfg.glyph_set == "emoji":
+        return _EMOJI_GLYPHS.get(glyph, glyph)
+    return glyph
+
+
+def _cell_to_columns(glyph: str, color: str, cfg: Config, colorize) -> str:
+    """Render one logical cell as exactly ``cfg.cell_width`` terminal columns.
+
+    The width invariant the no-clear redraw depends on: every cell contributes a
+    fixed column count so a full row is ``cfg.render_cols`` wide and a moving wide
+    glyph never leaves a stale second column behind (master 3.6).
+
+    Width is measured with ``wcswidth`` on the RAW display glyph BEFORE colorizing,
+    because ansi escapes make ``wcswidth`` return -1 on a colorized string. A
+    width-1 glyph is colorized then right-padded with uncolored spaces to fill the
+    cell; a full-width (== cell_width) glyph fills the cell alone. In ascii mode
+    cell_width == 1, so this reduces to the previous ``colorize(glyph, color)``.
+
+    Defensive: a glyph whose measured width is < 1 or > cell_width (a control char,
+    or a wide glyph landing in a narrow cell) would corrupt row alignment, so it
+    degrades to the original glyph if that fits one column, else a ``"?"``
+    placeholder, padded to cell_width. This keeps the row-width invariant intact
+    even on unexpected data.
+    """
+    display = _display_glyph(glyph, cfg)
+    width = wcswidth(display)
+    cell_width = cfg.cell_width
+    if width < 1 or width > cell_width:
+        fallback = glyph if wcswidth(glyph) == 1 else "?"
+        return colorize(fallback, color) + " " * (cell_width - 1)
+    # width in [1, cell_width]: colorize the glyph, then pad the leftover columns
+    # with UNCOLORED spaces (padding stays outside the color escapes).
+    return colorize(display, color) + " " * (cell_width - width)
 
 
 def compose_cells(state, cam: Camera, cfg: Config) -> list[list[tuple[str, str]]]:
@@ -169,9 +240,11 @@ def compose_frame(
 
     ``colorize(glyph, color_name) -> str`` is injected so this stays render-free
     and unit-testable: the headless test passes an identity colorizer, the
-    emitter passes a blessed-backed one. Each row is padded to exactly
-    ``cfg.viewport_w`` cells (fixed width erases ghosts, master 3.6); the HUD
-    lines overlay the top rows last (HUD draws over everything, master 3.4).
+    emitter passes a blessed-backed one. Each row is built to exactly
+    ``cfg.render_cols`` terminal columns -- gameplay rows via ``_cell_to_columns``
+    (cell_width columns per logical cell), HUD/panel rows via ``ljust`` -- so the
+    fixed width erases ghosts (master 3.6); the HUD lines overlay the top rows last
+    (HUD draws over everything, master 3.4).
 
     ``max_hp`` is threaded into the HUD as the HP-bar denominator (captured by the
     loop from the fresh run) so no player-start constant is hardcoded here.
@@ -191,12 +264,18 @@ def compose_frame(
     rendered_rows: list[str] = []
     for row_index, cells in enumerate(grid):
         if row_index < len(overlay):
-            # HUD text is plain (no per-glyph color); clip then pad to fixed width.
-            text = overlay[row_index][: cfg.viewport_w]
-            rendered_rows.append(text.ljust(cfg.viewport_w))
+            # HUD text is plain ascii (no per-glyph color, len == columns); clip
+            # then pad to the terminal-column width so it overwrites the full row.
+            text = overlay[row_index][: cfg.render_cols]
+            rendered_rows.append(text.ljust(cfg.render_cols))
         else:
+            # Each logical cell emits exactly cfg.cell_width terminal columns, so
+            # the row is cfg.render_cols wide in both ascii and emoji modes.
             rendered_rows.append(
-                "".join(colorize(glyph, color) for glyph, color in cells)
+                "".join(
+                    _cell_to_columns(glyph, color, cfg, colorize)
+                    for glyph, color in cells
+                )
             )
 
     # Modal overlay: the mode's panel (pause/gameover) or the level-up draft,
@@ -223,12 +302,12 @@ def _overlay_panel_centered(
 
     Serves every modal overlay (draft / pause / game-over). Vertically centered
     but never on top of the ``hud_height`` HUD rows, and horizontally centered.
-    Each line is plain text (no per-glyph color, like the HUD) clipped and padded
-    to the fixed viewport width so it cleanly overwrites the gameplay beneath it.
-    Lines that would fall outside the viewport are skipped, so a tall panel never
-    overflows the grid.
+    Each line is plain ascii text (no per-glyph color, like the HUD, so ``len`` ==
+    columns) clipped and padded to the terminal-column width so it centers across
+    and cleanly overwrites the full gameplay row beneath it. Lines that would fall
+    outside the viewport are skipped, so a tall panel never overflows the grid.
     """
-    width = cfg.viewport_w
+    width = cfg.render_cols
     height = cfg.viewport_h
     start = max(hud_height, (height - len(panel)) // 2)
     for offset, line in enumerate(panel):

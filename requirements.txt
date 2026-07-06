@@ -1,1 +1,6 @@
 blessed>=1.20
+# Direct dependency: terminal_vs/render/frame.py imports wcswidth to measure
+# terminal-column width for the emoji glyph set (loaded even in ascii mode). It
+# also ships transitively via blessed, but frame.py imports it directly, so it is
+# declared here rather than relied on as a transitive dependency.
+wcwidth>=0.2

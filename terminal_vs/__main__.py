@@ -11,6 +11,11 @@ time, so ``import terminal_vs.__main__`` does not open a terminal session.
 
 Seeding: ``TVS_SEED`` may pin the run for reproducible play/debugging; otherwise
 a system-entropy seed is used.
+
+Glyph set: ``TVS_GLYPH_SET`` ("ascii" | "emoji") opts into a render glyph set at
+launch without editing tracked config; unset uses the shipped tuning.toml default
+("ascii"). An invalid value fails on the same load-time validation path as an
+invalid TOML value.
 """
 
 from __future__ import annotations
@@ -33,12 +38,23 @@ def _make_rng() -> random.Random:
     return random.Random()
 
 
+def _glyph_set_override() -> str | None:
+    """Return the ``TVS_GLYPH_SET`` launch override (``None`` when unset).
+
+    Read here (not in config.py) so ``os.environ`` stays out of the config
+    module, mirroring how ``TVS_SEED`` is read for the rng. The value is validated
+    downstream by ``load_default_config`` -> ``load_config``, so an invalid string
+    fails on the same path as an invalid TOML ``glyph_set``.
+    """
+    return os.environ.get("TVS_GLYPH_SET")
+
+
 def main() -> int:
     """Set up the terminal and run the game loop. Returns 0 on clean exit."""
     import blessed
 
     term = blessed.Terminal()
-    cfg = load_default_config()
+    cfg = load_default_config(glyph_set_override=_glyph_set_override())
     rng = _make_rng()
     with term.fullscreen(), term.cbreak(), term.hidden_cursor():
         run(term, cfg, rng)

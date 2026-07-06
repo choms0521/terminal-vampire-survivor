@@ -223,6 +223,8 @@ def make_config(
     entity_cap: int = 200,
     sim_tps: float = 20.0,
     render_mode: str = "full",
+    glyph_set: str = "ascii",
+    cell_width: int | None = None,
     defs: BalanceDefs | None = None,
 ) -> Config:
     """Construct a Config for tests with overridable operating-point defaults.
@@ -230,7 +232,15 @@ def make_config(
     The balance side is a default :func:`make_defs` unless ``defs`` is provided,
     so world/spatial/damage tests that only touch operating-point fields need not
     care about balance content.
+
+    ``glyph_set`` / ``cell_width`` build an emoji-mode Config directly: pass the
+    EFFECTIVE ``viewport_w`` / ``aspect_x`` explicitly (this helper does NOT halve
+    them -- load-time derivation is exercised by the ``load_config`` tests). When
+    ``cell_width`` is None it defaults to 2 for emoji and 1 for ascii.
     """
+    resolved_cell_width = (
+        cell_width if cell_width is not None else (2 if glyph_set == "emoji" else 1)
+    )
     return Config(
         sim_tps=sim_tps,
         poll_timeout=0.005,
@@ -241,4 +251,6 @@ def make_config(
         aspect_x=aspect_x,
         render_mode=render_mode,
         defs=defs if defs is not None else make_defs(),
+        glyph_set=glyph_set,
+        cell_width=resolved_cell_width,
     )
