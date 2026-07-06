@@ -244,3 +244,111 @@ def test_shipped_config_loads_and_validates():
     assert caster.boss is True
     assert caster.fire_cadence == 2.5
     assert caster.fire_damage == 8.0
+
+
+# --- Glyph set (optional emoji render mode) load-time normalization ------------
+
+
+def test_glyph_set_defaults_to_ascii(tmp_path):
+    """Absent config -> ascii glyph set, cell_width 1, render_cols == viewport_w.
+
+    The shipped default is the safe ascii path: a logical cell is one terminal
+    column, so the effective grid equals the raw column budget.
+    """
+    cfg = load_config(
+        tmp_path / "absent_tuning.toml", tmp_path / "absent_balance.toml"
+    )
+    assert cfg.glyph_set == "ascii"
+    assert cfg.cell_width == 1
+    assert cfg.render_cols == cfg.viewport_w
+
+
+def test_emoji_glyph_set_derives_effective_geometry(tmp_path):
+    """glyph_set = "emoji" halves the logical grid: each cell is 2 columns.
+
+    Raw viewport_w = 80 / aspect_x = 2 with cell_width 2 derive effective
+    viewport_w = 40, aspect_x = 1.0, while render_cols stays the raw 80-column
+    budget (40 logical cells x 2 columns).
+    """
+    tuning = _write(
+        tmp_path / "tuning.toml", VALID_TUNING + '    glyph_set = "emoji"\n'
+    )
+    balance = _write(tmp_path / "balance.toml", VALID_BALANCE)
+
+    cfg = load_config(tuning, balance)
+
+    assert cfg.glyph_set == "emoji"
+    assert cfg.cell_width == 2
+    assert cfg.viewport_w == 40  # 80 raw // 2
+    assert cfg.aspect_x == 1.0  # 2 raw / 2
+    assert cfg.render_cols == 80  # back to the raw terminal-column budget
+
+
+def test_invalid_glyph_set_raises(tmp_path):
+    """A glyph_set outside {'ascii','emoji'} raises a clear ValueError."""
+    tuning = _write(
+        tmp_path / "tuning.toml", VALID_TUNING + '    glyph_set = "fancy"\n'
+    )
+    balance = _write(tmp_path / "balance.toml", VALID_BALANCE)
+
+    with pytest.raises(ValueError) as exc:
+        load_config(tuning, balance)
+    assert "glyph_set" in str(exc.value)
+
+
+def test_emoji_non_divisible_viewport_raises(tmp_path):
+    """An odd raw viewport_w cannot tile into 2-column emoji cells -> ValueError.
+
+    Rather than silently flooring/stretching, a raw width not divisible by
+    cell_width is rejected with a message naming viewport_w and cell_width.
+    """
+    bad = VALID_TUNING.replace("viewport_w   = 80", "viewport_w   = 81")
+    tuning = _write(tmp_path / "tuning.toml", bad + '    glyph_set = "emoji"\n')
+    balance = _write(tmp_path / "balance.toml", VALID_BALANCE)
+
+    with pytest.raises(ValueError) as exc:
+        load_config(tuning, balance)
+    msg = str(exc.value)
+    assert "viewport_w" in msg
+    assert "cell_width" in msg
+
+
+def test_glyph_set_override_activates_emoji_without_toml_edit(tmp_path):
+    """The startup override (TVS_GLYPH_SET) opts into emoji without a config edit.
+
+    The tuning file has no glyph_set key (ascii by default), yet the override runs
+    the SAME load-time derivation, so the effective geometry matches an emoji TOML.
+    """
+    tuning = _write(tmp_path / "tuning.toml", VALID_TUNING)  # ascii, no glyph_set
+    balance = _write(tmp_path / "balance.toml", VALID_BALANCE)
+
+    cfg = load_config(tuning, balance, glyph_set_override="emoji")
+
+    assert cfg.glyph_set == "emoji"
+    assert cfg.cell_width == 2
+    assert cfg.viewport_w == 40
+    assert cfg.aspect_x == 1.0
+    assert cfg.render_cols == 80
+
+
+def test_invalid_glyph_set_override_raises(tmp_path):
+    """An invalid override fails on the same ValueError path as an invalid TOML."""
+    tuning = _write(tmp_path / "tuning.toml", VALID_TUNING)
+    balance = _write(tmp_path / "balance.toml", VALID_BALANCE)
+
+    with pytest.raises(ValueError) as exc:
+        load_config(tuning, balance, glyph_set_override="bad")
+    assert "glyph_set" in str(exc.value)
+
+
+def test_shipped_config_glyph_set_is_ascii():
+    """The shipped tuning.toml keeps ascii as the default (emoji is opt-in only)."""
+    cfg = load_default_config()
+    assert cfg.glyph_set == "ascii"
+    assert cfg.cell_width == 1
+    assert cfg.render_cols == cfg.viewport_w
+    # The override plumbs through load_default_config too (mirrors TVS_GLYPH_SET).
+    emoji = load_default_config(glyph_set_override="emoji")
+    assert emoji.glyph_set == "emoji"
+    assert emoji.cell_width == 2
+    assert emoji.render_cols == cfg.render_cols  # same terminal-column budget

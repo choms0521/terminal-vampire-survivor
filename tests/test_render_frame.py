@@ -11,20 +11,25 @@ from __future__ import annotations
 
 import random
 
+from wcwidth import wcswidth
+
 from terminal_vs.render.frame import (
     _DOT_COLOR,
     _DOT_GLYPH,
     _DOT_SPACING_X,
     _DOT_SPACING_Y,
+    _EMOJI_GLYPHS,
     _FLOOR_GLYPH,
     _KNOWN_COLORS,
+    _cell_to_columns,
     _identity_colorize,
     _term_colorize,
     compose_cells,
     compose_frame,
 )
 from terminal_vs.rules.leveling import Choice
-from terminal_vs.sim.state import Enemy, make_enemy, new_run
+from terminal_vs.sim.state import Enemy, Pickup, make_enemy, new_run
+from terminal_vs.world import world_to_cell
 
 from .conftest import make_config
 
@@ -286,3 +291,182 @@ def test_compose_frame_draft_hidden_on_degenerate_viewport():
     assert all(len(row) == cfg.viewport_w for row in rows)
     assert rows[0].startswith("HP ")  # HUD intact, not clobbered by the draft
     assert "LEVEL UP" not in frame  # no room below the HUD -> overlay hidden
+
+
+# --- Emoji glyph set: 2-column render mode -----------------------------------
+#
+# In emoji mode every logical cell emits cfg.cell_width (== 2) terminal columns.
+# Terminal columns, not Python str length, are the invariant: an emoji is one code
+# point but two columns, so these tests measure with wcwidth.wcswidth (identity
+# colorize only -- ansi escapes make wcswidth return -1).
+
+
+def _emoji_cfg(**overrides):
+    """A directly-constructed emoji-mode Config (EFFECTIVE geometry passed in).
+
+    50 logical cells x 2 columns == 100 render columns; aspect_x is the already
+    halved effective value (load-time derivation is covered by the config tests).
+    """
+    params = dict(
+        glyph_set="emoji", cell_width=2, viewport_w=50, viewport_h=30, aspect_x=1.0
+    )
+    params.update(overrides)
+    return make_config(**params)
+
+
+def _display_columns(row: str) -> list[str]:
+    """Expand a rendered row into one entry per TERMINAL column.
+
+    A wide glyph (wcswidth 2) becomes its code point plus a "" continuation entry,
+    so ``cols[c*cell_width:(c+1)*cell_width]`` isolates logical cell c's columns.
+    Assumes an ansi-free row (identity colorize), so wcswidth is well-defined.
+    """
+    cols: list[str] = []
+    for ch in row:
+        width = wcswidth(ch)
+        if width <= 0:
+            continue
+        cols.append(ch)
+        cols.extend([""] * (width - 1))
+    return cols
+
+
+def test_cell_to_columns_floor_emits_cell_width_columns():
+    """A floor cell emits cell_width space columns in emoji mode (ghost erase)."""
+    cfg = _emoji_cfg()
+    out = _cell_to_columns(_FLOOR_GLYPH, "", cfg, _identity_colorize)
+    assert out == "  "
+    assert wcswidth(out) == cfg.cell_width
+
+
+def test_cell_to_columns_ascii_glyph_padded_to_cell_width():
+    """An unmapped 1-wide glyph becomes ``glyph + space`` (two columns)."""
+    cfg = _emoji_cfg()
+    out = _cell_to_columns(_DOT_GLYPH, _DOT_COLOR, cfg, _identity_colorize)
+    assert out == _DOT_GLYPH + " "
+    assert wcswidth(out) == cfg.cell_width
+
+
+def test_cell_to_columns_maps_player_glyph_to_emoji():
+    """The player glyph maps to its emoji, which fills the 2-column slot alone."""
+    cfg = _emoji_cfg()
+    out = _cell_to_columns("☻", "white", cfg, _identity_colorize)
+    assert out == _EMOJI_GLYPHS["☻"]
+    assert wcswidth(out) == cfg.cell_width
+
+
+def test_cell_to_columns_padding_is_uncolored():
+    """Padding spaces sit OUTSIDE the color escapes (width measured pre-colorize)."""
+    cfg = _emoji_cfg()
+
+    def fake(glyph: str, name: str) -> str:
+        return f"<{name}>{glyph}</>"
+
+    # A 1-wide unmapped glyph: the colorized glyph, then a bare (uncolored) pad.
+    out = _cell_to_columns("-", "white", cfg, fake)
+    assert out == "<white>-</> "
+    assert out.endswith("> ")  # trailing pad is a plain space, not inside <...>
+
+
+def test_cell_to_columns_defensive_fallback_for_wide_glyph_in_narrow_cell():
+    """A wide glyph in a 1-column ascii cell degrades to '?' rather than overflow.
+
+    Pathological input (an emoji reached in ascii mode): width 2 > cell_width 1, so
+    the defensive branch preserves the row-width invariant with a 1-column
+    placeholder instead of emitting two columns.
+    """
+    cfg = make_config()  # ascii, cell_width == 1
+    out = _cell_to_columns("🙂", "white", cfg, _identity_colorize)
+    assert out == "?"
+    assert wcswidth(out) == cfg.cell_width
+
+
+def test_emoji_frame_every_row_is_render_cols_wide():
+    """PRIMARY invariant: every rendered row is exactly render_cols columns wide in
+    emoji mode -- gameplay, HUD, and modal-overlay rows alike. A short row would
+    leave a stale ghost column under the no-clear redraw."""
+    cfg = _emoji_cfg()
+    state = new_run(cfg, random.Random(0))
+    # Cover all three row kinds: gameplay entities + the HUD (always) + a modal.
+    state.enemies.append(
+        make_enemy(
+            state.alloc_id(),
+            state.player.x + 3.0,
+            state.player.y,
+            cfg.defs.enemies["walker"],
+        )
+    )
+    state.pickups.append(
+        Pickup(state.alloc_id(), state.player.x - 3.0, state.player.y + 1.0, xp=1.0)
+    )
+    state.pending_choices = (
+        Choice(kind="weapon_upgrade", label="dagger Lv2", target="dagger"),
+        Choice(kind="passive", label="attack_speed Lv1", target="attack_speed"),
+    )
+    frame = compose_frame(state, state.camera, cfg, _identity_colorize, max_hp=100.0)
+    rows = frame.split("\n")
+    assert len(rows) == cfg.viewport_h
+    for row in rows:
+        assert wcswidth(row) == cfg.render_cols
+
+
+def test_emoji_frame_contains_mapped_glyphs():
+    """Player, pickup, and a mapped enemy render as their emoji in emoji mode."""
+    cfg = _emoji_cfg()
+    state = new_run(cfg, random.Random(0))
+    state.enemies.append(
+        make_enemy(
+            state.alloc_id(),
+            state.player.x + 3.0,
+            state.player.y,
+            cfg.defs.enemies["walker"],
+        )
+    )
+    state.pickups.append(
+        Pickup(state.alloc_id(), state.player.x - 3.0, state.player.y + 1.0, xp=1.0)
+    )
+    frame = compose_frame(state, state.camera, cfg, _identity_colorize, max_hp=100.0)
+    assert _EMOJI_GLYPHS["☻"] in frame  # player
+    assert _EMOJI_GLYPHS["z"] in frame  # walker enemy
+    assert _EMOJI_GLYPHS["✦"] in frame  # xp-gem pickup
+
+
+def test_emoji_unmapped_projectile_glyphs_stay_ascii_two_columns():
+    """Unmapped projectile glyphs are NOT emoji-substituted, but still fill the
+    2-column slot via padding so alignment holds."""
+    cfg = _emoji_cfg()
+    for glyph in ("-", ">", "=", "#", "O", "✱", "✺"):
+        out = _cell_to_columns(glyph, "white", cfg, _identity_colorize)
+        assert glyph in out  # stayed itself (not mapped to an emoji)
+        assert wcswidth(out) == cfg.cell_width
+
+
+def test_emoji_moving_enemy_leaves_no_ghost_column():
+    """When a wide enemy vacates a cell, that cell emits cell_width floor columns
+    (both overwritten), so the no-clear redraw leaves no stale second column.
+
+    The player is pinned to viewport center by Camera.follow, so an ENEMY is moved
+    between adjacent cells; the vacated cell must render back to floor."""
+    cfg = _emoji_cfg()
+    state = new_run(cfg, random.Random(0))
+    walker = cfg.defs.enemies["walker"]
+    enemy = make_enemy(
+        state.alloc_id(), state.player.x + 3.0, state.player.y + 2.0, walker
+    )
+    state.enemies.append(enemy)
+
+    grid_a = compose_cells(state, state.camera, cfg)
+    old_col, old_row = world_to_cell(enemy.x, enemy.y, state.camera, cfg)
+    assert grid_a[old_row][old_col][0] == "z"  # enemy occupies its cell in A
+
+    # Slide the enemy right ~2 cells (aspect_x == 1 -> ~1 cell per world unit).
+    enemy.x += 2.0
+    grid_b = compose_cells(state, state.camera, cfg)
+    new_col, new_row = world_to_cell(enemy.x, enemy.y, state.camera, cfg)
+    assert (new_col, new_row) != (old_col, old_row)  # it really changed cells
+    assert grid_b[old_row][old_col][0] == _FLOOR_GLYPH  # vacated cell is floor again
+
+    frame_b = compose_frame(state, state.camera, cfg, _identity_colorize, max_hp=100.0)
+    cols = _display_columns(frame_b.split("\n")[old_row])
+    vacated = cols[old_col * cfg.cell_width : (old_col + 1) * cfg.cell_width]
+    assert vacated == [" ", " "]  # exactly cell_width floor columns, no emoji ghost
