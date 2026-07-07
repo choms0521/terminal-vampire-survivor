@@ -17,4 +17,18 @@ elif [ -f "venv/bin/activate" ]; then
   source "venv/bin/activate"
 fi
 
-exec python -m terminal_vs "$@"
+# Render glyph set convenience flags: --ascii / --emoji set TVS_GLYPH_SET without
+# needing to know the env var (last one wins). Emoji is the shipped default, so
+# `./run.sh --ascii` is the escape hatch on a terminal/font that cannot render
+# 2-column emoji. Any other arguments are forwarded to the package entry point.
+PASS_ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --ascii) export TVS_GLYPH_SET=ascii ;;
+    --emoji) export TVS_GLYPH_SET=emoji ;;
+    *) PASS_ARGS+=("$arg") ;;
+  esac
+done
+
+# ${PASS_ARGS[@]+"..."} guards the empty-array expansion under `set -u` (bash 3.2).
+exec python -m terminal_vs ${PASS_ARGS[@]+"${PASS_ARGS[@]}"}

@@ -28,6 +28,20 @@ python3 -m venv .venv
 .venv/bin/python -m terminal_vs   # entry point (to be implemented)
 ```
 
+## Terminal compatibility (glyph modes)
+
+The game renders with **emoji glyphs by default** (🙂 player, 🧟 enemies, 🔪 / 🔱
+weapons). Emoji occupy 2 terminal columns; if your terminal or font can't render
+them at that width the screen looks misaligned. Switch to the ASCII glyph set:
+
+```bash
+./run.sh --ascii      # ASCII fallback (equivalent to TVS_GLYPH_SET=ascii)
+./run.sh --emoji      # force emoji (this is the shipped default)
+```
+
+Both the `--ascii` / `--emoji` flags and the `TVS_GLYPH_SET` environment variable
+override the shipped default; an explicit `TVS_GLYPH_SET` wins if both are set.
+
 ## Documentation
 
 - [Master design & technical plan](docs/plan/2026-06-23/work-plan-v1.md)
