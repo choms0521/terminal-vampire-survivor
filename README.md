@@ -3,10 +3,13 @@
 A terminal (TUI) port of the "bullet heaven" survival roguelite popularized by
 *Vampire Survivors*: you only move, your weapons fire on their own, and waves of
 enemies pour in while you collect gems, level up, and combine weapons into
-powerful evolutions — all rendered in the terminal with truecolor ASCII.
+powerful evolutions — all rendered in the terminal with truecolor emoji or ASCII
+glyphs.
 
-> **Status: planning.** No playable build yet. The design and technical plan
-> lives in [`docs/plan/2026-06-23/work-plan-v1.md`](docs/plan/2026-06-23/work-plan-v1.md).
+> **Status: playable dev build.** The real-time loop, auto-firing weapons, level-up
+> drafts, weapon evolutions, bosses, and cross-run meta upgrades are implemented and
+> runnable via `./run.sh`. The design and technical plan lives in
+> [`docs/plan/2026-06-23/work-plan-v1.md`](docs/plan/2026-06-23/work-plan-v1.md).
 
 ## Vision
 
@@ -20,13 +23,32 @@ powerful evolutions — all rendered in the terminal with truecolor ASCII.
 - Python 3
 - [`blessed`](https://pypi.org/project/blessed/) for terminal rendering and input
 
-## Getting started (planned)
+## Getting started
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m terminal_vs   # entry point (to be implemented)
+./run.sh                          # launch (emoji glyphs by default)
+# or run the package entry point directly:
+.venv/bin/python -m terminal_vs
 ```
+
+## Terminal compatibility (glyph modes)
+
+The game renders with **emoji glyphs by default** (🙂 player, 🧟 enemies, 🔪 / 🔱
+weapons). Emoji occupy 2 terminal columns; if your terminal or font can't render
+them at that width the screen looks misaligned. Switch to the ASCII glyph set:
+
+```bash
+./run.sh --ascii      # ASCII fallback (equivalent to TVS_GLYPH_SET=ascii)
+./run.sh --emoji      # force emoji (this is the shipped default)
+```
+
+Both the `--ascii` / `--emoji` flags and the `TVS_GLYPH_SET` environment variable
+override the shipped default. If both are present the **flag wins** (it is the more
+immediate, intentional signal), so `./run.sh --ascii` always works as an escape
+hatch even when your shell exports `TVS_GLYPH_SET=emoji`. With no flag, an inherited
+`TVS_GLYPH_SET` is used as-is.
 
 ## Documentation
 
