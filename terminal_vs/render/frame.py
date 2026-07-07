@@ -13,8 +13,9 @@ This module composites the visible simulation into a flicker-free terminal frame
 
 Logical cells vs terminal columns: the cell grid is ``viewport_h`` x
 ``viewport_w`` LOGICAL cells, but each cell emits ``cfg.cell_width`` TERMINAL
-columns at output time (1 in the default "ascii" glyph set, 2 in "emoji" where a
-2-column emoji replaces an entity glyph). ``_cell_to_columns`` performs that
+columns at output time (1 in the fallback "ascii" glyph set, 2 in the shipped
+"emoji" set where a 2-column emoji replaces an entity glyph). ``_cell_to_columns``
+performs that
 conversion, always emitting exactly ``cfg.cell_width`` columns per cell so a full
 row is ``cfg.render_cols`` columns wide -- the invariant the no-clear redraw needs
 so a moving wide glyph never leaves a stale second column behind.

@@ -12,9 +12,10 @@ time, so ``import terminal_vs.__main__`` does not open a terminal session.
 Seeding: ``TVS_SEED`` may pin the run for reproducible play/debugging; otherwise
 a system-entropy seed is used.
 
-Glyph set: ``TVS_GLYPH_SET`` ("ascii" | "emoji") opts into a render glyph set at
+Glyph set: ``TVS_GLYPH_SET`` ("ascii" | "emoji") forces a render glyph set at
 launch without editing tracked config; unset uses the shipped tuning.toml default
-("ascii"). An invalid value fails on the same load-time validation path as an
+("emoji"). Set ``TVS_GLYPH_SET=ascii`` to revert on a terminal without emoji
+support. An invalid value fails on the same load-time validation path as an
 invalid TOML value.
 """
 
