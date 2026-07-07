@@ -93,17 +93,31 @@ _DOT_SPACING_Y = 3.0  # world units; maps 1:1 to rows -> 3 rows between dot rows
 # Render-layer glyph -> emoji map (emoji glyph set only). Keyed by the ascii/unicode
 # glyph the sim/balance layers already carry, so nothing upstream (balance.toml,
 # rules.defs, sim.state, make_enemy, conftest) changes -- on-screen glyphs are
-# unique, so a by-glyph dict is a sufficient supply model. Unmapped glyphs
-# (projectiles like "-" ">" "=" "#" "O" plus the arcane "✱"/"✺") stay ascii and are
-# padded to cell_width columns. Each emoji here is a 2-column (wcswidth == 2) cell.
+# unique, so a by-glyph dict is a sufficient supply model. Covers every on-screen
+# entity and weapon glyph; the only glyph left unmapped is the background dot "·",
+# which stays ascii and is padded to cell_width columns. Each emoji here is a
+# 2-column (wcswidth == 2) cell (asserted by test_all_emoji_glyphs_are_width_two).
 _EMOJI_GLYPHS = {
+    # Entities: player, pickup, enemies, bosses.
     "☻": "🙂",  # player
     "✦": "💎",  # xp-gem pickup
     "z": "🧟",  # walker enemy
     "x": "🦇",  # swarm enemy
     "B": "👹",  # brute enemy
     "◉": "🐗",  # tank boss
-    "✸": "🧙",  # caster boss
+    "✸": "🧙",  # caster boss (its projectiles reuse this glyph)
+    # Weapons: projectile / melee-effect glyphs. Each maps to a single-code-point
+    # width-2 emoji in the same 0x1F3xx-0x1F5xx range as the entities above. No
+    # variation-selector (VS16) emoji -- those render width-1 in some terminals and
+    # would break the row-width invariant the no-clear redraw depends on.
+    "-": "🔪",  # dagger dart
+    "✱": "🔮",  # magic_bolt
+    ")": "🌀",  # swing (melee arc effect)
+    ">": "🏹",  # dagger_evolved (piercing fan)
+    "=": "🔱",  # lance
+    "#": "🌟",  # lance_evolved
+    "✺": "💥",  # nova (radial burst)
+    "O": "🔵",  # orbit
 }
 
 
