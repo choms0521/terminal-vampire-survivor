@@ -18,4 +18,4 @@ render_mode  = "diff"   # PROVISIONAL - "full" | "diff"
 poll_timeout = 0.005    # PROVISIONAL - input poll timeout (sec)
 max_catchup  = 5        # PROVISIONAL - max sim catch-up ticks per render frame
 aspect_x     = 2        # PROVISIONAL - horizontal cell aspect compensation factor
-glyph_set    = "ascii"  # "ascii" | "emoji" render glyph set (shipped default; TVS_GLYPH_SET env overrides at launch)
+glyph_set    = "emoji"  # "ascii" | "emoji" render glyph set (shipped default; TVS_GLYPH_SET=ascii env reverts at launch for non-emoji terminals)

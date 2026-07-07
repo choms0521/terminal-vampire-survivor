@@ -158,10 +158,12 @@ class Config:
     aspect_x: float       # EFFECTIVE horizontal aspect factor (after normalization, section 3.1)
     render_mode: str      # "full" | "diff"
     defs: BalanceDefs     # immutable balance tables built from balance.toml
-    # Render glyph set (opt-in). "ascii" is the shipped default and fallback;
-    # "emoji" maps entity glyphs to 2-column emoji at the render output stage.
+    # Render glyph set. "emoji" is the shipped default (maps glyphs to 2-column
+    # emoji at the render output stage); "ascii" is the safe fallback for non-emoji
+    # terminals (absent-key fallback and the TVS_GLYPH_SET=ascii launch override).
     # These trail the required fields (with defaults) so existing direct Config
-    # construction in tests stays valid without passing them.
+    # construction in tests stays valid without passing them; the field default
+    # stays "ascii" so a Config built without a glyph_set is the safe path.
     glyph_set: str = "ascii"  # "ascii" | "emoji"
     cell_width: int = 1       # terminal columns each logical cell emits (1 ascii, 2 emoji)
 
@@ -662,8 +664,9 @@ def load_config(
         )
 
     # Glyph set: an env override (mirroring TVS_SEED) wins over the TOML value so a
-    # user can opt into emoji mode without editing tracked config; otherwise the
-    # tuning file (default "ascii") decides. Empty override -> falls back to TOML.
+    # user can force ascii/emoji without editing tracked config; otherwise the
+    # tuning file decides (shipped "emoji"; the _TUNING_DEFAULTS fallback for an
+    # absent key stays "ascii"). Empty override -> falls back to TOML.
     glyph_set = glyph_set_override or str(
         tuning.get("glyph_set", _TUNING_DEFAULTS["glyph_set"])
     )

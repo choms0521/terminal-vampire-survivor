@@ -252,8 +252,9 @@ def test_shipped_config_loads_and_validates():
 def test_glyph_set_defaults_to_ascii(tmp_path):
     """Absent config -> ascii glyph set, cell_width 1, render_cols == viewport_w.
 
-    The shipped default is the safe ascii path: a logical cell is one terminal
-    column, so the effective grid equals the raw column budget.
+    When the glyph_set key is absent the code falls back to the safe ascii path
+    (the shipped tuning.toml opts into emoji explicitly): a logical cell is one
+    terminal column, so the effective grid equals the raw column budget.
     """
     cfg = load_config(
         tmp_path / "absent_tuning.toml", tmp_path / "absent_balance.toml"
@@ -341,14 +342,18 @@ def test_invalid_glyph_set_override_raises(tmp_path):
     assert "glyph_set" in str(exc.value)
 
 
-def test_shipped_config_glyph_set_is_ascii():
-    """The shipped tuning.toml keeps ascii as the default (emoji is opt-in only)."""
+def test_shipped_config_glyph_set_is_emoji():
+    """The shipped tuning.toml defaults to emoji; the raw 100-column budget stays
+    while the logical grid halves to 50 cells (each 2 columns). ascii remains the
+    safe fallback via the TVS_GLYPH_SET=ascii launch override."""
     cfg = load_default_config()
-    assert cfg.glyph_set == "ascii"
-    assert cfg.cell_width == 1
-    assert cfg.render_cols == cfg.viewport_w
-    # The override plumbs through load_default_config too (mirrors TVS_GLYPH_SET).
-    emoji = load_default_config(glyph_set_override="emoji")
-    assert emoji.glyph_set == "emoji"
-    assert emoji.cell_width == 2
-    assert emoji.render_cols == cfg.render_cols  # same terminal-column budget
+    assert cfg.glyph_set == "emoji"
+    assert cfg.cell_width == 2
+    assert cfg.viewport_w == 50  # raw 100 // 2
+    assert cfg.render_cols == 100  # back to the raw terminal-column budget
+    # The override plumbs through load_default_config too (mirrors TVS_GLYPH_SET)
+    # and can force ascii on a terminal without emoji support.
+    ascii_cfg = load_default_config(glyph_set_override="ascii")
+    assert ascii_cfg.glyph_set == "ascii"
+    assert ascii_cfg.cell_width == 1
+    assert ascii_cfg.render_cols == ascii_cfg.viewport_w

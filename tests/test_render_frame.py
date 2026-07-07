@@ -363,8 +363,10 @@ def test_cell_to_columns_padding_is_uncolored():
         return f"<{name}>{glyph}</>"
 
     # A 1-wide unmapped glyph: the colorized glyph, then a bare (uncolored) pad.
-    out = _cell_to_columns("-", "white", cfg, fake)
-    assert out == "<white>-</> "
+    # The background dot stays unmapped in emoji mode, so it exercises this branch
+    # (weapon glyphs like "-" now map to a full-width emoji instead).
+    out = _cell_to_columns(_DOT_GLYPH, "white", cfg, fake)
+    assert out == f"<white>{_DOT_GLYPH}</> "
     assert out.endswith("> ")  # trailing pad is a plain space, not inside <...>
 
 
@@ -431,14 +433,24 @@ def test_emoji_frame_contains_mapped_glyphs():
     assert _EMOJI_GLYPHS["✦"] in frame  # xp-gem pickup
 
 
-def test_emoji_unmapped_projectile_glyphs_stay_ascii_two_columns():
-    """Unmapped projectile glyphs are NOT emoji-substituted, but still fill the
-    2-column slot via padding so alignment holds."""
+def test_emoji_weapon_glyphs_map_to_emoji():
+    """Every weapon projectile / melee-effect glyph maps to a width-2 emoji that
+    fills the 2-column slot alone (no padding), so combat reads as emoji-native."""
     cfg = _emoji_cfg()
-    for glyph in ("-", ">", "=", "#", "O", "✱", "✺"):
+    for glyph in ("-", "✱", ")", ">", "=", "#", "✺", "O"):
+        emoji = _EMOJI_GLYPHS[glyph]  # KeyError here == a weapon glyph went unmapped
         out = _cell_to_columns(glyph, "white", cfg, _identity_colorize)
-        assert glyph in out  # stayed itself (not mapped to an emoji)
+        assert out == emoji  # substituted, fills the cell alone (no trailing pad)
         assert wcswidth(out) == cfg.cell_width
+
+
+def test_all_emoji_glyphs_are_width_two():
+    """Regression backstop: EVERY mapped emoji (entities + weapons) must measure
+    exactly 2 columns. A VS16 / narrow emoji added later would silently break the
+    row-width invariant the no-clear redraw depends on -- this catches it at test
+    time (wcswidth agreement; the terminal-font check stays a human gate)."""
+    for src, emoji in _EMOJI_GLYPHS.items():
+        assert wcswidth(emoji) == 2, (src, emoji)
 
 
 def test_emoji_moving_enemy_leaves_no_ghost_column():
