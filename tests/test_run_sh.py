@@ -46,7 +46,9 @@ def _run(tmp_path: Path, *flags: str, env_glyph: str | None = None):
     stub.write_text(_STUB)
     stub.chmod(0o755)
 
-    env = {**os.environ, "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}"}
+    # .get so a minimal environment without PATH does not raise KeyError.
+    parent_path = os.environ.get("PATH", "")
+    env = {**os.environ, "PATH": f"{bindir}{os.pathsep}{parent_path}"}
     env.pop("TVS_GLYPH_SET", None)  # start from a clean slate unless asked otherwise
     if env_glyph is not None:
         env["TVS_GLYPH_SET"] = env_glyph
