@@ -33,13 +33,23 @@
 
 ## 3. 우선순위 사다리 (두 PR 모두 보존)
 
-각 PR 본문에 명시한다.
+각 PR 본문에 명시한다. 우선순위는 **두 계층**으로 나뉘며, 이 둘을 섞으면 자가당착이 되므로 분리해 서술한다.
 
-1. `TVS_GLYPH_SET` env(비어있지 않음) -> 항상 우선(기존 동작 유지). `test_glyph_set_override_activates_emoji_without_toml_edit` green 유지.
-2. run.sh `--ascii/--emoji` -> `TVS_GLYPH_SET`을 export -> 자식 프로세스에게는 (1)이 됨(플래그가 상속 env를 덮음). [3.1]
-3. 자동감지 -> `TVS_GLYPH_SET`이 unset/empty일 때만; **명확한 비-UTF-8 신호일 때만** ascii로 내림. [3.2]
-4. TOML `glyph_set = "emoji"`(shipped) -> 위가 아무것도 발동 안 하면 이것이 기본. `test_shipped_config_glyph_set_is_emoji` green 유지 -> **config.py 기본값 손대지 않음.**
-5. `_TUNING_DEFAULTS["glyph_set"] = "ascii"` -> 키가 아예 없을 때만(shipped 경로 아님).
+### 3.1. 셸 계층 (run.sh) — 어떤 값이 자식 프로세스의 `TVS_GLYPH_SET`이 되는가
+
+1. run.sh `--ascii/--emoji` 플래그(마지막이 이김) -> `TVS_GLYPH_SET`을 export하여 **상속된 값을 덮음**. 가장 즉각적·의도적 신호이자 탈출구이므로 최우선. [3.1]
+2. 플래그가 없으면 상속된 `TVS_GLYPH_SET`이 그대로 자식에게 전달된다(run.sh는 건드리지 않음).
+
+> 즉 셸 계층에서는 **플래그 > 상속 env**. `./run.sh --ascii`는 셸이 `TVS_GLYPH_SET=emoji`를 export한 상태에서도 반드시 ascii로 내려야 탈출구가 신뢰성 있게 작동한다.
+
+### 3.2. Python 계층 (`__main__`/config) — 자식이 받은 값으로 glyph_set을 어떻게 정하는가
+
+3. 프로세스에 도달한 `TVS_GLYPH_SET`(비어있지 않음) -> TOML보다 우선(기존 동작 유지). `test_glyph_set_override_activates_emoji_without_toml_edit` green 유지.
+4. 자동감지 -> `TVS_GLYPH_SET`이 unset/empty일 때만; **명확한 비-UTF-8 신호일 때만** ascii로 내림. [3.2]
+5. TOML `glyph_set = "emoji"`(shipped) -> 위가 아무것도 발동 안 하면 이것이 기본. `test_shipped_config_glyph_set_is_emoji` green 유지 -> **config.py 기본값 손대지 않음.**
+6. `_TUNING_DEFAULTS["glyph_set"] = "ascii"` -> 키가 아예 없을 때만(shipped 경로 아님).
+
+> Copilot PR #13 리뷰 정정: 초기 초안은 "env 항상 우선"(셸)과 "플래그가 env를 덮음"을 동시에 적어 모순이었다. 결정은 **셸 계층에서 플래그 우선**(탈출구 신뢰성). `test_flag_overrides_inherited_env`가 이 의도를 고정한다.
 
 ## 4. PR A — run.sh `--ascii` / `--emoji` 편의 플래그
 

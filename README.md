@@ -40,7 +40,10 @@ them at that width the screen looks misaligned. Switch to the ASCII glyph set:
 ```
 
 Both the `--ascii` / `--emoji` flags and the `TVS_GLYPH_SET` environment variable
-override the shipped default; an explicit `TVS_GLYPH_SET` wins if both are set.
+override the shipped default. If both are present the **flag wins** (it is the more
+immediate, intentional signal), so `./run.sh --ascii` always works as an escape
+hatch even when your shell exports `TVS_GLYPH_SET=emoji`. With no flag, an inherited
+`TVS_GLYPH_SET` is used as-is.
 
 ## Documentation
 

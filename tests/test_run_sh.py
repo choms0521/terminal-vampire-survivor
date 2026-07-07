@@ -39,8 +39,9 @@ def _run(tmp_path: Path, *flags: str, env_glyph: str | None = None):
     shutil.copy(_RUN_SH, script)
 
     # Stub `python` first on PATH: a shell script, so it never starts a REPL.
+    # exist_ok so a single test can call _run more than once (same tmp_path).
     bindir = tmp_path / "bin"
-    bindir.mkdir()
+    bindir.mkdir(exist_ok=True)
     stub = bindir / "python"
     stub.write_text(_STUB)
     stub.chmod(0o755)
@@ -99,3 +100,21 @@ def test_unknown_args_forwarded_and_flag_consumed(tmp_path):
     assert glyph == "ascii"
     assert args == "-m terminal_vs foo --bar"
     assert "--ascii" not in args  # the glyph flag is consumed, not forwarded
+
+
+def test_flag_overrides_inherited_env(tmp_path):
+    """Escape-hatch guarantee (intended precedence): an explicit --ascii/--emoji
+    flag beats a non-empty inherited TVS_GLYPH_SET, so `./run.sh --ascii` reverts
+    even when the shell exports emoji -- and the reverse forces emoji over an
+    inherited ascii. The flag is the most immediate, intentional signal."""
+    glyph, _ = _run(tmp_path, "--ascii", env_glyph="emoji")
+    assert glyph == "ascii"
+    glyph, _ = _run(tmp_path, "--emoji", env_glyph="ascii")
+    assert glyph == "emoji"
+
+
+def test_inherited_env_passes_through_without_flag(tmp_path):
+    """With no flag, run.sh does not touch TVS_GLYPH_SET, so an inherited value
+    reaches the child unchanged (the env still decides when nothing is typed)."""
+    glyph, _ = _run(tmp_path, env_glyph="emoji")
+    assert glyph == "emoji"
