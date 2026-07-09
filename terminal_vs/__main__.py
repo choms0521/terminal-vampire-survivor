@@ -25,6 +25,7 @@ TOML value.
 
 from __future__ import annotations
 
+import codecs
 import os
 import random
 import sys
@@ -55,6 +56,21 @@ def _glyph_set_override() -> str | None:
     return os.environ.get("TVS_GLYPH_SET")
 
 
+def _is_utf8_codec(encoding: str) -> bool:
+    """True if ``encoding`` names a UTF-8 codec, canonicalizing aliases.
+
+    Python reports a UTF-8 stdout under several labels -- "utf-8", "UTF8", "U8",
+    and on Windows the code-page form "cp65001" -- all of which ``codecs.lookup``
+    maps to the canonical name "utf-8". A bare substring check ("utf" in enc) would
+    miss "cp65001" and wrongly downgrade a UTF-8 Windows console to ascii. Falls
+    back to that substring check only for a label that is not a registered codec.
+    """
+    try:
+        return codecs.lookup(encoding).name == "utf-8"
+    except LookupError:
+        return "utf" in encoding.lower()
+
+
 def _detect_glyph_fallback(
     stdout_encoding: str | None,
     lang: str | None,
@@ -70,22 +86,22 @@ def _detect_glyph_fallback(
 
     Order of evidence:
       * The stdout encoding is the most direct signal of what will actually be
-        written -- UTF-8 keeps emoji; a present non-UTF-8 encoding
+        written -- a UTF-8 codec (including aliases like Windows "cp65001", via
+        ``_is_utf8_codec``) keeps emoji; a present non-UTF-8 encoding
         (ascii/latin-1/cp1252) forces ascii.
       * With no stdout encoding, fall back to the effective locale (POSIX
         precedence LC_ALL -> LC_CTYPE -> LANG): a UTF-8 locale keeps emoji, a
-        C/POSIX locale forces ascii.
+        C/POSIX locale forces ascii. (Locale strings are not codec names, so this
+        stays a substring check -- ".UTF-8" is embedded in the locale.)
       * Anything else is ambiguous -> keep the emoji default (``None``).
 
     A UTF-8 locale paired with an emoji-incapable font is NOT detectable here; that
     case is covered by the explicit ``TVS_GLYPH_SET=ascii`` / ``run.sh --ascii``
     escape hatch, not this heuristic.
     """
-    enc = (stdout_encoding or "").lower()
-    if "utf" in enc:
-        return None
-    if enc:  # present but not UTF-8 -> the terminal will mangle 2-column emoji
-        return "ascii"
+    enc = stdout_encoding or ""
+    if enc:  # present -> authoritative; canonicalize UTF-8 aliases (cp65001 etc.)
+        return None if _is_utf8_codec(enc) else "ascii"
     locale = (lc_all or lc_ctype or lang or "").lower()
     if "utf" in locale:
         return None

@@ -19,6 +19,20 @@ def test_utf8_stdout_keeps_emoji():
     assert _detect_glyph_fallback("utf-8", None, None, None) is None
 
 
+def test_utf8_aliases_keep_emoji():
+    """UTF-8 stdout reported under an alias -- notably the Windows code-page form
+    "cp65001", plus "UTF8"/"U8"/"utf_8" -- is canonicalized and keeps emoji, not a
+    false-positive ascii downgrade (would fail a bare "utf" substring check)."""
+    for enc in ("cp65001", "UTF8", "U8", "utf_8"):
+        assert _detect_glyph_fallback(enc, None, None, None) is None, enc
+
+
+def test_legacy_codepage_stdout_falls_back():
+    """A genuinely non-UTF-8 stdout codec still downgrades to ascii."""
+    for enc in ("ascii", "cp1252", "latin-1"):
+        assert _detect_glyph_fallback(enc, None, None, None) == "ascii", enc
+
+
 def test_ascii_stdout_falls_back():
     """A present non-UTF-8 stdout encoding forces ascii even if the locale is UTF-8
     (stdout is what actually gets written)."""
