@@ -143,6 +143,22 @@ orbit_angular_speed = 3.0    # revolution speed (radians / second)
 glyph               = "O"
 color               = "cyan"
 
+# Scatter: a close-range shotgun -- 5 low-damage pellets fanned in a wide cone at
+# the nearest enemy, with a short ttl so they only connect up close. Data-only: it
+# reuses the "nearest" + spread_angle + multi-projectile path (same as the
+# dagger_evolved fan), so no new sim/targeting code is needed.
+[weapons.scatter]
+max_level        = 8
+cooldown         = 1.4
+damage           = 4.0     # low per pellet; 5 pellets make it a burst
+projectile_count = 5
+projectile_speed = 16.0
+projectile_ttl   = 0.5     # short range (~8 world units): a close-quarters burst
+targeting        = "nearest"
+spread_angle     = 55.0    # fan the 5 pellets across a 55 deg cone
+glyph            = "•"
+color            = "yellow"
+
 # Passives. Each multiplies a single stat per owned level (product over levels).
 #   attack_speed -> cooldown multiplier (< 1 makes weapons fire faster)
 #   move_speed   -> movement multiplier (> 1 makes the player faster)
@@ -198,6 +214,16 @@ move_speed   = 1.5
 spawn_weight = 8.0
 glyph        = "B"
 color        = "yellow"
+
+# Charger: a fast, durable rusher -- fills the "fast + tanky" gap (swarm is
+# fast+weak, brute is slow+tanky, nothing was fast+durable). Data-only: a regular
+# (non-boss) weighted-spawn enemy, so it auto-joins the director's spawn pool.
+[enemies.charger]
+hp           = 22.0
+move_speed   = 4.0        # nearly swarm-fast but far more durable
+spawn_weight = 12.0       # rarer than walker (70) / swarm (30)
+glyph        = "C"
+color        = "bright_red"
 
 # Boss enemy: very high hp, slow, large xp reward. Excluded from the regular
 # weighted spawn pool (boss = true) and spawned only when the director crosses a
