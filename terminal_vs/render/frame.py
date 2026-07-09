@@ -107,6 +107,7 @@ _EMOJI_GLYPHS = {
     "B": "👹",  # brute enemy
     "◉": "🐗",  # tank boss
     "✸": "🧙",  # caster boss (its projectiles reuse this glyph)
+    "C": "🐺",  # charger enemy (fast, durable rusher)
     # Weapons: projectile / melee-effect glyphs. Each maps to a single-code-point
     # width-2 emoji in the same 0x1F3xx-0x1F5xx range as the entities above. No
     # variation-selector (VS16) emoji -- those render width-1 in some terminals and
@@ -119,6 +120,7 @@ _EMOJI_GLYPHS = {
     "#": "🌟",  # lance_evolved
     "✺": "💥",  # nova (radial burst)
     "O": "🔵",  # orbit
+    "•": "🟠",  # scatter (shotgun pellet)
 }
 
 
